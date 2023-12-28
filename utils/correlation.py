@@ -1,10 +1,12 @@
 import torch
 
-import cupy
+# import cupy
 import re
 
+
 class Stream:
-	ptr = torch.cuda.current_stream().cuda_stream
+	# NADAV changed ptr initialization to account for systems where cuda isn't available
+	ptr = torch.cuda.current_stream().cuda_stream if torch.cuda.device_count() > 0 else 0
 # end
 
 kernel_Correlation_rearrange = '''
@@ -272,9 +274,14 @@ def cupy_kernel(strFunction, objectVariables):
 	return strKernel
 # end
 
-@cupy.util.memoize(for_each_device=True)
-def cupy_launch(strFunction, strKernel):
-	return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
+#TODO NADAV moved the cupy import and putted everything in a try-except block
+try:
+	import cupy
+	@cupy.util.memoize(for_each_device=True)
+	def cupy_launch(strFunction, strKernel):
+		return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
+except ImportError:
+	pass
 # end
 
 class _FunctionCorrelation(torch.autograd.Function):

@@ -32,8 +32,10 @@ def backwarp(img, flow):
 
     gridX, gridY = np.meshgrid(np.arange(W), np.arange(H))
 
-    gridX = torch.tensor(gridX, requires_grad=False,).cuda()
-    gridY = torch.tensor(gridY, requires_grad=False,).cuda()
+    # gridX = torch.tensor(gridX, requires_grad=False,).cuda()
+    # gridY = torch.tensor(gridY, requires_grad=False,).cuda()
+    gridX = torch.tensor(gridX, requires_grad=False, )
+    gridY = torch.tensor(gridY, requires_grad=False, )
     x = gridX.unsqueeze(0).expand_as(u).float() + u
     y = gridY.unsqueeze(0).expand_as(v).float() + v
     # range -1 to 1

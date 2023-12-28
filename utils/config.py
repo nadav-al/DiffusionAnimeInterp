@@ -1,7 +1,7 @@
 import os.path as osp
 import sys
 from argparse import ArgumentParser
-from collections import Iterable
+from collections.abc import Iterable # Nadav - Since Python3.10 Iterable was removed from collections, it is now under collections.abc
 from importlib import import_module
 from easydict import EasyDict as edict
 

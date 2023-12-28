@@ -9,7 +9,7 @@ class ForwardWarp(nn.Module):
 	"""docstring for WarpLayer"""
 	def __init__(self,):
 		super(ForwardWarp, self).__init__()
-	
+
 
 	def forward(self, img, flo):
 		"""
@@ -18,7 +18,7 @@ class ForwardWarp(nn.Module):
 			elements of flo is in [0, H] and [0, W] for dx, dy
 
 		"""
-		
+
 
 		# (x1, y1)		(x1, y2)
 		# +---------------+
@@ -33,14 +33,16 @@ class ForwardWarp(nn.Module):
 
 
 		N, C, _, _ = img.size()
-		
+
 		# translate start-point optical flow to end-point optical flow
+		#	extracts the x and y components of the optical flow
 		y = flo[:, 0:1 :, :]
 		x = flo[:, 1:2, :, :]
-
+		#	repeats the x,y components across the channel dimension.
+		#	This is done to match the number of channels in the image.
 		x = x.repeat(1, C, 1, 1)
 		y = y.repeat(1, C, 1, 1)
-	
+
 		# Four point of square (x1, y1), (x1, y2), (x2, y1), (y2, y2)
 		x1 = torch.floor(x)
 		x2 = x1 + 1
@@ -50,7 +52,7 @@ class ForwardWarp(nn.Module):
 		# firstly, get bilinear weights
 		w11, w12, w21, w22 = self.get_bilinear_weights(x, y, x1, x2, y1, y2)
 
-		# secondly, sample each weighted corner 
+		# secondly, sample each weighted corner
 		img11, o11 = self.sample_one(img, x1, y1, w11)
 		img12, o12 = self.sample_one(img, x1, y2, w12)
 		img21, o21 = self.sample_one(img, x2, y1, w21)
@@ -101,7 +103,7 @@ class ForwardWarp(nn.Module):
 			idxc = torch.arange(0, C, requires_grad=False).view(1, C, 1, 1).long().cuda().repeat(N, 1, H, W).view(-1)
 		else:
 			idxn = torch.arange(0, N, requires_grad=False).view(N, 1, 1, 1).long().repeat(1, C, H, W).view(-1)
-			idxc = torch.arange(0, C, requires_grad=False).view(1, C, 1, 1).long().repeat(N, 1, H, W).view(-1)			
+			idxc = torch.arange(0, C, requires_grad=False).view(1, C, 1, 1).long().repeat(N, 1, H, W).view(-1)
 		# ttype = flat_basex.type()
 		idxx = flat_shiftx.long() + flat_basex
 		idxy = flat_shifty.long() + flat_basey
@@ -112,7 +114,7 @@ class ForwardWarp(nn.Module):
 		# mask = mask
 
 		# Mask off points out of boundaries
-		
+
 		# index = torch.arange(mask.size(0)).type(torch.cuda.LongTensor).cuda()[mask]
 		ids = (idxn*C*H*W + idxc*H*W + idxx*W + idxy)
 
@@ -133,11 +135,11 @@ class ForwardWarp(nn.Module):
 		#difference back propagate -> No influence! Whether we do need mask? mask?
 		# put (add) them together
 		if use_gpu:
-			img_warp = torch.zeros([N*C*H*W, ]).cuda() 
+			img_warp = torch.zeros([N*C*H*W, ]).cuda()
 		else:
 			img_warp = torch.zeros([N*C*H*W, ])
 		img_warp.put_(ids_mask, torch.masked_select(flat_img*flat_weight, mask), accumulate=True)
-		
+
 		if use_gpu:
 			one_warp = torch.zeros([N*C*H*W, ]).cuda()
 		else:
@@ -149,4 +151,3 @@ class ForwardWarp(nn.Module):
 
 		return img_warp.view(N, C, H, W), one_warp.view(N, C, H, W)
 
-	

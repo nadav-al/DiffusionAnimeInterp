@@ -2,7 +2,8 @@
 
 import torch
 
-import cupy
+if torch.cuda.is_available():
+	import cupy
 import re
 
 kernel_Softsplat_updateOutput = '''
@@ -230,6 +231,7 @@ def cupy_kernel(strFunction, objVariables):
 
 	return strKernel
 # end
+
 
 @cupy.util.memoize(for_each_device=True)
 def cupy_launch(strFunction, strKernel):

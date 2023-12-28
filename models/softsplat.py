@@ -4,7 +4,6 @@
 ########################
 import torch
 
-import cupy
 import re
 
 kernel_Softsplat_updateOutput = '''
@@ -233,10 +232,16 @@ def cupy_kernel(strFunction, objVariables):
 	return strKernel
 # end
 
-@cupy.util.memoize(for_each_device=True)
-def cupy_launch(strFunction, strKernel):
-	return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
-# end
+#TODO NADAV moved the cupy import and putted everything in a try-except block
+try:
+	import cupy
+	@cupy.util.memoize(for_each_device=True)
+	def cupy_launch(strFunction, strKernel):
+		return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
+	# end
+except ImportError:
+	def cupy_launch(strFunction, strKernel):
+		pass
 
 class _FunctionSoftsplat(torch.autograd.Function):
 	@staticmethod
