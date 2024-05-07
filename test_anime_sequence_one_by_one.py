@@ -56,7 +56,7 @@ def validate(config):
     # model = getattr(models, config.model)(config.pwc_path).cuda()
     model = getattr(models, config.model)(config.pwc_path)
     model = nn.DataParallel(model)
-    retImg = []
+    retImg = [] 
 
     # load weights
     dict1 = torch.load(config.checkpoint)

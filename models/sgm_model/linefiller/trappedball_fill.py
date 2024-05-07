@@ -251,7 +251,7 @@ def build_fill_map(image, fills):
     # Returns
         an array.
     """
-    result = np.zeros(image.shape[:2], np.int)
+    result = np.zeros(image.shape[:2], np.int32)
 
     for index, fill in enumerate(fills):
         result[fill] = index + 1
@@ -330,7 +330,8 @@ def get_border_point(points, rect, max_height, max_width):
     fill[(points[0] - border_rect[1], points[1] - border_rect[0])] = 255
 
     # Get shape.
-    _, contours, _ = cv2.findContours(fill, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # _, contours, _ = cv2.findContours(fill, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # OpenCV 3
+    contours, _ = cv2.findContours(fill, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # OpenCV 4
     approx_shape = cv2.approxPolyDP(contours[0], 0.02 * cv2.arcLength(contours[0], True), True)
 
     # Get border pixel.

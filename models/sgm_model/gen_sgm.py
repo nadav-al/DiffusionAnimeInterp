@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import cv2
 from skimage import filters
+from PIL import Image
 
 import torch
 import torch.nn.functional as F
@@ -16,8 +17,10 @@ from linefiller.trappedball_fill import trapped_ball_fill_multi, flood_fill_mult
 # for super pixelpooling
 from torch_scatter import scatter_mean
 from torch_scatter import scatter_add
+from torch_scatter import scatter
 
-import softsplat
+
+
 from forward_warp2 import ForwardWarp
 from my_models import create_VGGFeatNet
 from vis_flow import flow_to_color
@@ -25,7 +28,6 @@ from vis_flow import flow_to_color
 
 
 def dline_of(x, low_thr=1, high_thr=20, bf_args=[30,40,30]):
-    xm = cv2.medianBlur(x, 5)
 #     xga = cv2.GaussianBlur(x,(5, 5),cv2.BORDER_DEFAULT)
     xb = cv2.bilateralFilter(x, bf_args[0], bf_args[1], bf_args[2])
 #     xb = cv2.bilateralFilter(xb, 20, 60, 10 )
@@ -205,8 +207,8 @@ def get_deformable_flow(flowObj, img1, mask_1, box_1,
         fwarp_mask_close = fwarp_mask
         fwarp_mask_close[fwarp_mask_close<0.05] = 0
         
-        union_region = np.logical_and(fwarp_mask_close.astype(np.bool), mask2_patch_pad.astype(np.bool))
-        union_rate = np.sum(union_region.astype(np.bool))/np.sum(fwarp_mask_close.astype(np.bool))
+        union_region = np.logical_and(fwarp_mask_close.astype(bool), mask2_patch_pad.astype(bool))
+        union_rate = np.sum(union_region.astype(bool))/np.sum(fwarp_mask_close.astype(bool))
 
     ###
     mask1_patch_pad = np.pad(mask1_patch, ([H_front_pad, H_back_pad], [W_front_pad, W_back_pad]), mode='constant')
@@ -232,7 +234,8 @@ def get_guidance_flow(label_map1, label_map2, img1, img2,
     color_patch1 = show_fill_map(label_map1)
     color_patch2 = show_fill_map(label_map2)
 
-    flowObj = cv2.optflow.createOptFlow_DIS(cv2.optflow.DISOpticalFlow_PRESET_MEDIUM)
+    # flowObj = cv2.optflow.createOptFlow_DIS(cv2.optflow.DISOpticalFlow_PRESET_MEDIUM)  # og
+    flowObj = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
     # flowObj.setUseMeanNormalization(False)
     # flowObj.setUseSpatialPropagation(False)
     flowObj.setVariationalRefinementIterations(25)
@@ -242,6 +245,7 @@ def get_guidance_flow(label_map1, label_map2, img1, img2,
     flowObj.setGradientDescentIterations(50)
 
     if use_gpu:
+        import softsplat
         func_fwarp2 = softsplat.ModuleSoftsplat('average')
     else:
         func_fwarp2 = ForwardWarp()
@@ -422,10 +426,15 @@ if __name__ == "__main__":
         print(imgFileNames)
         sys.stdout.flush()
 
+        # img1 = Image.open(os.path.join(input_subfolder, imgFileNames[0]))
+        # img3 = Image.open(os.path.join(input_subfolder, imgFileNames[-1]))
+
         img1 = cv2.imread(os.path.join(input_subfolder, imgFileNames[0]))
         img3 = cv2.imread(os.path.join(input_subfolder, imgFileNames[-1]))
 
         # segmentation
+        # img1_rs = img1.resize(tar_size)
+        # img3_rs = img3.resize(tar_size)
         img1_rs = cv2.resize(img1, tar_size)
         img3_rs = cv2.resize(img3, tar_size)
 
@@ -516,8 +525,8 @@ if __name__ == "__main__":
         lH, lW = labelMap1.shape
         gridX, gridY = np.meshgrid(np.arange(lW), np.arange(lH))
 
-        gridX_flat = torch.tensor(gridX.astype(np.float), requires_grad=False).reshape(lH*lW)
-        gridY_flat = torch.tensor(gridY.astype(np.float), requires_grad=False).reshape(lH*lW)
+        gridX_flat = torch.tensor(gridX.astype(np.float64), requires_grad=False).reshape(lH*lW)
+        gridY_flat = torch.tensor(gridY.astype(np.float64), requires_grad=False).reshape(lH*lW)
 
         labelMap1_flat = torch.tensor(labelMap1.reshape(lH*lW)).long()
         labelMap3_flat = torch.tensor(labelMap3.reshape(lH*lW)).long()
@@ -528,6 +537,12 @@ if __name__ == "__main__":
             labelMap1_flat = labelMap1_flat.cuda()
             labelMap3_flat = labelMap3_flat.cuda()
 
+        # original version was:
+        #   scatter_mean(grid_flat, labelMap_flat).cpu().numpy()
+        # mean_X_1 = torch.scatter_reduce(gridX_flat, labelMap1_flat, reduce="mean").cpu().numpy()
+        # mean_Y_1 = torch.scatter_reduce(gridY_flat, labelMap1_flat, reduce="mean").cpu().numpy()
+        # mean_X_3 = torch.scatter_reduce(gridX_flat, labelMap3_flat, reduce="mean").cpu().numpy()
+        # mean_Y_3 = torch.scatter_reduce(gridY_flat, labelMap3_flat, reduce="mean").cpu().numpy()
         mean_X_1 = scatter_mean(gridX_flat, labelMap1_flat).cpu().numpy()
         mean_Y_1 = scatter_mean(gridY_flat, labelMap1_flat).cpu().numpy()
         mean_X_3 = scatter_mean(gridX_flat, labelMap3_flat).cpu().numpy()

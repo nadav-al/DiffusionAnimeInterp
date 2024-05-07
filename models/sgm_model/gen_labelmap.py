@@ -12,7 +12,7 @@ from linefiller.trappedball_fill import trapped_ball_fill_multi, flood_fill_mult
 
 
 def dline_of(x, low_thr=1, high_thr=20, bf_args=[30,40,30]):
-    xm = cv2.medianBlur(x, 5)
+    # xm = cv2.medianBlur(x, 5)
 #     xga = cv2.GaussianBlur(x,(5, 5),cv2.BORDER_DEFAULT)
     xb = cv2.bilateralFilter(x, bf_args[0], bf_args[1], bf_args[2])
 #     xb = cv2.bilateralFilter(xb, 20, 60, 10 )
