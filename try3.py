@@ -11,6 +11,9 @@ import cv2
 from utils.vis_flow import flow_to_color
 from utils.config import Config
 
+from diffusers import StableDiffusionXLImg2ImgPipeline
+from diffusers.utils import load_image
+
 def save_flow_to_img(flow, des):
     f = flow[0].data.cpu().numpy().transpose([1, 2, 0])
     fcopy = f.copy()
@@ -31,8 +34,13 @@ def validate(config):
     revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
     revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
     revNormalize = TF.Compose([revnormalize1, revnormalize2])
-
     revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
+
+#     refiner_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+#     "stabilityai/stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+# )
+
+
 
     testset = datas.AniTripletWithSGMFlowTest(config.testset_root, config.test_flow_root, trans, config.test_size,
                                               config.test_crop_size, train=False)
@@ -45,7 +53,7 @@ def validate(config):
 
     # prepare model
     # model = getattr(models, config.model)(config.pwc_path).cuda()
-    model = getattr(models, config.model)(config.pwc_path)
+    model = getattr(models, config.model)(config.pwc_path, config=config)
     model = nn.DataParallel(model)
     retImg = []
 
@@ -90,8 +98,8 @@ def validate(config):
             if not os.path.exists(config.store_path + '/' + folder[0][0]):
                 os.mkdir(config.store_path + '/' + folder[0][0])
 
-            revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/' + index[0][0] + '.jpg')
-            revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + '/' + index[-1][0] + '.jpg')
+            revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/' + index[0][0] + '.png')
+            revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + '/' + index[-1][0] + '.png')
             for tt in range(config.inter_frames):
                 x = config.inter_frames
                 t = 1.0 / (x + 1) * (tt + 1)
@@ -100,8 +108,9 @@ def validate(config):
 
                 It_warp = outputs[0]
 
-                to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)).save(
-                    store_path + '/' + folder[1][0] + '/' + index[1][0] + '.png')
+                warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+                # warp_img = refiner_pipe(image=warp_img).images[0]
+                warp_img.save(store_path + '/' + folder[1][0] + '/' + index[1][0] + '.png')
 
                 save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/' + index[1][0] + '_F12')
                 save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/' + index[1][0] + '_F21')

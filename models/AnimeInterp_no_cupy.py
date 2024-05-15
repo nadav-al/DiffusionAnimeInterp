@@ -10,8 +10,8 @@ from .rfr_model.rfr_new import RFR as RFR
 from .forward_warp2 import ForwardWarp
 from .GridNet import GridNet
 
-
-
+from PIL import Image
+from torchvision import transforms as TF
 
 class FeatureExtractor(nn.Module):
     """The quadratic model"""
@@ -43,7 +43,7 @@ class FeatureExtractor(nn.Module):
 
 class AnimeInterpNoCupy(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', args=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', args=None, config=None):
         super(AnimeInterpNoCupy, self).__init__()
 
         args = argparse.Namespace()
@@ -56,6 +56,13 @@ class AnimeInterpNoCupy(nn.Module):
         self.fwarp = ForwardWarp()
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
 
+        revmean = [-x for x in config.mean]
+        revstd = [1.0 / x for x in config.std]
+        revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
+        revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
+        self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
+        self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
+        self.store_path = config.store_path
 
         if path is not None:
             dict1 = torch.load(path)
@@ -70,6 +77,9 @@ class AnimeInterpNoCupy(nn.Module):
         tmp[:, 1:] = tmp[:, 1:].clone() * tmp.size()[2] / flo.size()[2]
 
         return tmp
+
+
+
     def forward(self, I1, I2, F12i, F21i, t):
         r = 0.6
 
@@ -84,7 +94,7 @@ class AnimeInterpNoCupy(nn.Module):
         feat11, feat12, feat13 = self.feat_ext(I1o)
         feat21, feat22, feat23 = self.feat_ext(I2o)
 
-        # calculate motion 
+        # calculate motion
 
         # with torch.no_grad():
         # self.flownet.eval()
@@ -103,7 +113,8 @@ class AnimeInterpNoCupy(nn.Module):
         F1tddd = self.dflow(F1t, feat13)
         F2tddd = self.dflow(F2t, feat23)
 
-        # warping 
+
+        # warping
 
         I1t, norm1 = self.fwarp(I1, F1t)
         feat1t1, norm1t1 = self.fwarp(feat11, F1td)
@@ -114,26 +125,28 @@ class AnimeInterpNoCupy(nn.Module):
         feat2t1, norm2t1 = self.fwarp(feat21, F2td)
         feat2t2, norm2t2 = self.fwarp(feat22, F2tdd)
         feat2t3, norm2t3 = self.fwarp(feat23, F2tddd)
-        
+
         # normalize
         # Note: normalize in this way benefit training than the original "linear"
         I1t[norm1 > 0] = I1t.clone()[norm1 > 0] / norm1[norm1 > 0]
         I2t[norm2 > 0] = I2t.clone()[norm2 > 0] / norm2[norm2 > 0]
-        
+
         feat1t1[norm1t1 > 0] = feat1t1.clone()[norm1t1 > 0] / norm1t1[norm1t1 > 0]
         feat2t1[norm2t1 > 0] = feat2t1.clone()[norm2t1 > 0] / norm2t1[norm2t1 > 0]
-        
+        # for exploration and understanding the model, saves the intermediate results
+        # self.revtrans(feat1t1.cpu()[0]).save(f'{self.store_path}/feat1t1_{self.counter}.png')
+        # self.revtrans(feat2t1.cpu()[0]).save(f'{self.store_path}/feat2t1_{self.counter}.png')
+
         feat1t2[norm1t2 > 0] = feat1t2.clone()[norm1t2 > 0] / norm1t2[norm1t2 > 0]
         feat2t2[norm2t2 > 0] = feat2t2.clone()[norm2t2 > 0] / norm2t2[norm2t2 > 0]
-        
+
         feat1t3[norm1t3 > 0] = feat1t3.clone()[norm1t3 > 0] / norm1t3[norm1t3 > 0]
         feat2t3[norm2t3 > 0] = feat2t3.clone()[norm2t3 > 0] / norm2t3[norm2t3 > 0]
-
 
         # synthesis
         It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
 
-
+        # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
 
         return It_warp, F12, F21, F12in, F21in
 
