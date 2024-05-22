@@ -233,9 +233,11 @@ def cupy_kernel(strFunction, objVariables):
 # end
 
 
-@cupy.util.memoize(for_each_device=True)
+# @cupy.util.memoize(for_each_device=True)  # original, not supported
+@cupy.memoize(for_each_device=True)  # fixed
 def cupy_launch(strFunction, strKernel):
-	return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
+	# return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
+	return cupy.RawKernel(strKernel, strFunction)
 # end
 
 class _FunctionSoftsplat(torch.autograd.Function):
@@ -348,7 +350,7 @@ def FunctionSoftsplat(tenInput, tenFlow, tenMetric, strType):
 
 	# end
 
-	tenOutput = _FunctionSoftsplat.apply(tenInput, tenFlow)
+	tenOutput = _FunctionSoftsplat.apply(tenInput.contiguous(), tenFlow.contiguous())
 
 	if strType == 'seperate':
 		return tenOutput[:, :-1, :, :], tenOutput[:, -1:, :, :] + 0.0000001

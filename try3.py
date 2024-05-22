@@ -52,8 +52,10 @@ def validate(config):
     sys.stdout.flush()
 
     # prepare model
-    # model = getattr(models, config.model)(config.pwc_path).cuda()
-    model = getattr(models, config.model)(config.pwc_path, config=config)
+    if torch.cuda.is_available():
+        model = getattr(models, config.model)(config.pwc_path).cuda()
+    else:
+        model = getattr(models, config.model)(config.pwc_path, config=config)
     model = nn.DataParallel(model)
     retImg = []
 
@@ -112,8 +114,8 @@ def validate(config):
                 # warp_img = refiner_pipe(image=warp_img).images[0]
                 warp_img.save(store_path + '/' + folder[1][0] + '/' + index[1][0] + '.png')
 
-                save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/' + index[1][0] + '_F12')
-                save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/' + index[1][0] + '_F21')
+                save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/' + 'F12_' + index[1][0] )
+                save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/' + 'F21_' + index[1][0] )
 
 
 if __name__ == "__main__":
