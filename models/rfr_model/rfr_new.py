@@ -32,10 +32,12 @@ def backwarp(img, flow):
 
     gridX, gridY = np.meshgrid(np.arange(W), np.arange(H))
 
-    # gridX = torch.tensor(gridX, requires_grad=False,).cuda()
-    # gridY = torch.tensor(gridY, requires_grad=False,).cuda()
-    gridX = torch.tensor(gridX, requires_grad=False, )
-    gridY = torch.tensor(gridY, requires_grad=False, )
+    if torch.cuda.is_available():
+        gridX = torch.tensor(gridX, requires_grad=False,).cuda()
+        gridY = torch.tensor(gridY, requires_grad=False,).cuda()
+    else:
+        gridX = torch.tensor(gridX, requires_grad=False, )
+        gridY = torch.tensor(gridY, requires_grad=False, )
     x = gridX.unsqueeze(0).expand_as(u).float() + u
     y = gridY.unsqueeze(0).expand_as(v).float() + v
     # range -1 to 1
@@ -133,7 +135,7 @@ class RFR(nn.Module):
             error21 = torch.zeros(image1.size()[0], 1, image1.size()[2]//8, image1.size()[3]//8).cuda()
 
             f12_init = flow_init
-            # print('None inital flow!')
+            print('None inital flow!')
         
         image1 = F.interpolate(image1, size=(H8, W8), mode='bilinear')
         image2 = F.interpolate(image2, size=(H8, W8), mode='bilinear')
