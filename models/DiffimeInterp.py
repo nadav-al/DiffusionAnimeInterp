@@ -99,7 +99,7 @@ class DiffimeInterp(nn.Module):
         feat11, feat12, feat13 = self.feat_ext(I1o)
         feat21, feat22, feat23 = self.feat_ext(I2o)
 
-        return feat11, feat12, feat13, feat21, feat22, feat23
+        return I1o, [feat11, feat12, feat13], I2o, [feat21, feat22, feat23]
 
     def motion_calculation(self, Is, Ie, Flow, features, t, ind):
         """

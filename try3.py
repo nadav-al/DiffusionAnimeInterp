@@ -41,7 +41,10 @@ def validate(config):
 #     "stabilityai/stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
 # )
 
-
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
 
     testset = datas.AniTripletWithSGMFlowTest(config.testset_root, config.test_flow_root, trans, config.test_size,
                                               config.test_crop_size, train=False)
@@ -55,9 +58,9 @@ def validate(config):
 
     # prepare model
     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-        model = getattr(models, config.model)(config.pwc_path).cuda()
+        model = getattr(models, config.model)(config.pwc_path).to(device)
     else:
-        model = getattr(models, config.model)(config.pwc_path, config=config)
+        model = getattr(models, config.model)(config.pwc_path, config=config).to(device)
     model = nn.DataParallel(model)
     retImg = []
 
@@ -93,16 +96,20 @@ def validate(config):
             F12i, F21i = flow
             ITs = [sample[tt] for tt in range(1, 2)]
 
-            if torch.cuda.is_available():
-                F12i = F12i.float().cuda()
-                F21i = F21i.float().cuda()
-                I1 = first_frame.cuda()
-                I2 = last_frame.cuda()
-            else:
-                F12i = F12i.float()
-                F21i = F21i.float()
-                I1 = first_frame
-                I2 = last_frame
+            F12i = F12i.float().to(device)
+            F21i = F21i.float().to(device)
+            I1 = first_frame.to(device)
+            I2 = last_frame.to(device)
+            #if torch.cuda.is_available():
+            #    F12i = F12i.float().cuda()
+            #    F21i = F21i.float().cuda()
+            #    I1 = first_frame.cuda()
+            #    I2 = last_frame.cuda()
+            #else:
+            #    F12i = F12i.float()
+            #    F21i = F21i.float()
+            #    I1 = first_frame
+            #    I2 = last_frame
 
             num_of_frames = config.inter_frames
 
@@ -116,7 +123,11 @@ def validate(config):
             x = num_of_frames
             for tt in range(num_of_frames):
                 t = 1.0 / (x + 1) * (tt + 1)
-
+		
+                print(I1.device)
+                print(I2.device)
+                print(F12i.device)
+                print(F21i.device)
                 outputs = model(I1, I2, F12i, F21i, t)
 
                 It_warp = outputs[0]
