@@ -12,7 +12,7 @@ from .GridNet import GridNet
 
 from PIL import Image
 from torchvision import transforms as TF
-from diffusers import ControlNetModel, AutoPipelineForText2Image
+from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
 
 import cv2
 
@@ -90,8 +90,142 @@ class FeatureExtractor(nn.Module):
 
 class DiffimeInterpNoCupy(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', controlnet_id="diffusers/controlnet-canny-sdxl-1.0", diffuser_id="stabilityai/stable-diffusion-xl-base-1.0", ip_adapter_id="h94/IP-Adapter", canny_th_low=50, canny_th_high=150, config=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, base_diff=None):
         super(DiffimeInterpNoCupy, self).__init__()
+
+        args = argparse.Namespace()
+        args.small = False
+        args.mixed_precision = False
+        # args.requires_sq_flow = False
+
+        self.flownet = RFR(args)
+        self.feat_ext = FeatureExtractor()
+        self.fwarp = ForwardWarp()
+        self.synnet = GridNet(6, 64, 128, 96*2, 3)
+
+        revmean = [-x for x in config.mean]
+        revstd = [1.0 / x for x in config.std]
+        revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
+        revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
+        self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
+        self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
+
+        # self.diff_objective = config.diff_objective
+        print("loading diffuser")
+        if base_diff is not None:
+            self.pipline = AutoPipelineForImage2Image(**base_diff.components)
+            pass
+        else:
+            self.pipline = AutoPipelineForImage2Image.from_pretrained(config.diff_path, torch_dtype=torch.float16, variant="fp16", use_safetensors=True)
+        print("diffuser loaded")
+        self.pipline.enable_model_cpu_offload()
+
+        self.store_path = config.store_path
+        self.counter = 0
+
+        if path is not None:
+            dict1 = torch.load(path)
+            dict2 = dict()
+            for key in dict1:
+                dict2[key[7:]] = dict1[key]
+            self.flownet.load_state_dict(dict2, strict=False)
+
+    def dflow(self, flo, target):
+        tmp = F.interpolate(flo, target.size()[2:4])
+        tmp[:, :1] = tmp[:, :1].clone() * tmp.size()[3] / flo.size()[3]
+        tmp[:, 1:] = tmp[:, 1:].clone() * tmp.size()[2] / flo.size()[2]
+
+        return tmp
+
+    def extract_features_2_frames(self, I1, I2):
+        I1o = (I1 - 0.5) / 0.5
+        I2o = (I2 - 0.5) / 0.5
+
+        return I1o, self.feat_ext(I1o), I2o, self.feat_ext(I2o)
+
+    def motion_calculation(self, Is, Ie, Flow, features, t, ind):
+        """
+        Args:
+            Is: source image
+            Ie: target image
+            Flow: initial flow
+
+            t: interpolation factor
+            ind: index of the frame
+        """
+        F12, F12in, _ = self.flownet(Is, Ie, iters=12, test_mode=False, flow_init=Flow)
+        if ind == 0:
+            Ft = t * F12
+        else:
+            Ft = (1-t) * F12
+
+        Ftd = self.dflow(Ft, features[0])
+        Ftdd = self.dflow(Ft, features[1])
+        Ftddd = self.dflow(Ft, features[2])
+
+        return F12, F12in, Ft, Ftd, Ftdd, Ftddd
+
+
+    def forward(self, I1, I2, F12i, F21i, t):
+        # extract features
+        I1o, features1, I2o, features2 = self.extract_features_2_frames(I1, I2)
+        feat11, feat12, feat13 = features1
+        feat21, feat22, feat23 = features2
+
+        # calculate motion
+        F12, F12in, F1t, F1td, F1tdd, F1tddd = self.motion_calculation(I1o, I2o, F12i, features1, t, 0)
+        F21, F21in, F2t, F2td, F2tdd, F2tddd = self.motion_calculation(I2o, I1o, F21i, features2, t, 1)
+
+        # warping
+        I1t, norm1 = self.fwarp(I1, F1t)
+        feat1t1, norm1t1 = self.fwarp(feat11, F1td)
+        feat1t2, norm1t2 = self.fwarp(feat12, F1tdd)
+        feat1t3, norm1t3 = self.fwarp(feat13, F1tddd)
+
+        I2t, norm2 = self.fwarp(I2, F2t)
+        feat2t1, norm2t1 = self.fwarp(feat21, F2td)
+        feat2t2, norm2t2 = self.fwarp(feat22, F2tdd)
+        feat2t3, norm2t3 = self.fwarp(feat23, F2tddd)
+
+        # normalize
+        # Note: normalize in this way benefit training than the original "linear"
+        I1t[norm1 > 0] = I1t.clone()[norm1 > 0] / norm1[norm1 > 0]
+        I2t[norm2 > 0] = I2t.clone()[norm2 > 0] / norm2[norm2 > 0]
+
+        feat1t1[norm1t1 > 0] = feat1t1.clone()[norm1t1 > 0] / norm1t1[norm1t1 > 0]
+        feat2t1[norm2t1 > 0] = feat2t1.clone()[norm2t1 > 0] / norm2t1[norm2t1 > 0]
+
+        feat1t2[norm1t2 > 0] = feat1t2.clone()[norm1t2 > 0] / norm1t2[norm1t2 > 0]
+        feat2t2[norm2t2 > 0] = feat2t2.clone()[norm2t2 > 0] / norm2t2[norm2t2 > 0]
+
+        feat1t3[norm1t3 > 0] = feat1t3.clone()[norm1t3 > 0] / norm1t3[norm1t3 > 0]
+        feat2t3[norm2t3 > 0] = feat2t3.clone()[norm2t3 > 0] / norm2t3[norm2t3 > 0]
+
+        self.revtrans(I1t.cpu()[0]).save(self.store_path + f'/inter/fold{self.counter}/first_frame.png')
+        self.revtrans(I2t.cpu()[0]).save(self.store_path + f'/inter/fold{self.counter}/last_frame.png')
+        # diffuser
+        dI1t = self.pipline("High quality. 2D classic animation. Clean. ", negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t)
+        dI2t = self.pipline("High quality. 2D classic animation. Clean. ", negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t)
+        self.revtrans(dI1t.cpu()[0]).save(self.store_path + f'/inter/fold{self.counter}/first_frame_diff.png')
+        self.revtrans(dI2t.cpu()[0]).save(self.store_path + f'/inter/fold{self.counter}/last_frame_diff.png')
+
+        print("diffused")
+
+        # synthesis
+        It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1),
+                              torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
+        #
+        # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+
+        return It_warp, F12, F21, F12in, F21in
+
+
+
+
+class CannyDiffimeInterpNoCupy(nn.Module):
+    """The quadratic model"""
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None,  canny_th_low=50, canny_th_high=150):
+        super(CannyDiffimeInterpNoCupy, self).__init__()
 
         args = argparse.Namespace()
         args.small = False
@@ -114,7 +248,7 @@ class DiffimeInterpNoCupy(nn.Module):
         self.cth_high = canny_th_high
         print("loading controlnet")
         controlnet = ControlNetModel.from_pretrained(
-            controlnet_id,
+            config.controlnet_id,
             torch_dtype=torch.float16,
             variant="fp16",
             use_safetensors=True,
@@ -250,79 +384,3 @@ class DiffimeInterpNoCupy(nn.Module):
         # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
 
         return It_warp, F12, F21, F12in, F21in
-
-
-
-    # def forward_old(self, I1, I2, F12i, F21i, t):
-    #     r = 0.6
-    #
-    #     # I1 = I1[:, [2, 1, 0]]
-    #     # I2 = I2[:, [2, 1, 0]]
-    #
-    #
-    #     # extract features
-    #     I1o = (I1 - 0.5) / 0.5
-    #     I2o = (I2 - 0.5) / 0.5
-    #
-    #     feat11, feat12, feat13 = self.feat_ext(I1o)
-    #     feat21, feat22, feat23 = self.feat_ext(I2o)
-    #
-    #     # calculate motion
-    #
-    #     # with torch.no_grad():
-    #     # self.flownet.eval()
-    #     F12, F12in, err12, = self.flownet(I1o, I2o, iters=12, test_mode=False, flow_init=F12i)
-    #     F21, F21in, err12, = self.flownet(I2o, I1o, iters=12, test_mode=False, flow_init=F21i)
-    #
-    #     F1t = t * F12
-    #     F2t = (1-t) * F21
-    #
-    #     F1td = self.dflow(F1t, feat11)
-    #     F2td = self.dflow(F2t, feat21)
-    #
-    #     F1tdd = self.dflow(F1t, feat12)
-    #     F2tdd = self.dflow(F2t, feat22)
-    #
-    #     F1tddd = self.dflow(F1t, feat13)
-    #     F2tddd = self.dflow(F2t, feat23)
-    #
-    #
-    #     # warping
-    #
-    #     I1t, norm1 = self.fwarp(I1, F1t)
-    #     feat1t1, norm1t1 = self.fwarp(feat11, F1td)
-    #     feat1t2, norm1t2 = self.fwarp(feat12, F1tdd)
-    #     feat1t3, norm1t3 = self.fwarp(feat13, F1tddd)
-    #
-    #     I2t, norm2 = self.fwarp(I2, F2t)
-    #     feat2t1, norm2t1 = self.fwarp(feat21, F2td)
-    #     feat2t2, norm2t2 = self.fwarp(feat22, F2tdd)
-    #     feat2t3, norm2t3 = self.fwarp(feat23, F2tddd)
-    #
-    #     # normalize
-    #     # Note: normalize in this way benefit training than the original "linear"
-    #     I1t[norm1 > 0] = I1t.clone()[norm1 > 0] / norm1[norm1 > 0]
-    #     I2t[norm2 > 0] = I2t.clone()[norm2 > 0] / norm2[norm2 > 0]
-    #
-    #     feat1t1[norm1t1 > 0] = feat1t1.clone()[norm1t1 > 0] / norm1t1[norm1t1 > 0]
-    #     feat2t1[norm2t1 > 0] = feat2t1.clone()[norm2t1 > 0] / norm2t1[norm2t1 > 0]
-    #     # for exploration and understanding the model, saves the intermediate results
-    #     # self.revtrans(feat1t1.cpu()[0]).save(f'{self.store_path}/feat1t1_{self.counter}.png')
-    #     # self.revtrans(feat2t1.cpu()[0]).save(f'{self.store_path}/feat2t1_{self.counter}.png')
-    #
-    #     feat1t2[norm1t2 > 0] = feat1t2.clone()[norm1t2 > 0] / norm1t2[norm1t2 > 0]
-    #     feat2t2[norm2t2 > 0] = feat2t2.clone()[norm2t2 > 0] / norm2t2[norm2t2 > 0]
-    #
-    #     feat1t3[norm1t3 > 0] = feat1t3.clone()[norm1t3 > 0] / norm1t3[norm1t3 > 0]
-    #     feat2t3[norm2t3 > 0] = feat2t3.clone()[norm2t3 > 0] / norm2t3[norm2t3 > 0]
-    #
-    #     # synthesis
-    #     It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
-    #
-    #     # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-    #
-    #     return It_warp, F12, F21, F12in, F21in
-
-
-
-

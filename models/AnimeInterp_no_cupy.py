@@ -43,7 +43,7 @@ class FeatureExtractor(nn.Module):
 
 class AnimeInterpNoCupy(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', args=None, config=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', args=None):
         super(AnimeInterpNoCupy, self).__init__()
 
         args = argparse.Namespace()
@@ -55,14 +55,6 @@ class AnimeInterpNoCupy(nn.Module):
         self.feat_ext = FeatureExtractor()
         self.fwarp = ForwardWarp()
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
-
-        revmean = [-x for x in config.mean]
-        revstd = [1.0 / x for x in config.std]
-        revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
-        revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
-        self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
-        self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
-        self.store_path = config.store_path
 
         if path is not None:
             dict1 = torch.load(path)
@@ -133,9 +125,6 @@ class AnimeInterpNoCupy(nn.Module):
 
         feat1t1[norm1t1 > 0] = feat1t1.clone()[norm1t1 > 0] / norm1t1[norm1t1 > 0]
         feat2t1[norm2t1 > 0] = feat2t1.clone()[norm2t1 > 0] / norm2t1[norm2t1 > 0]
-        # for exploration and understanding the model, saves the intermediate results
-        # self.revtrans(feat1t1.cpu()[0]).save(f'{self.store_path}/feat1t1_{self.counter}.png')
-        # self.revtrans(feat2t1.cpu()[0]).save(f'{self.store_path}/feat2t1_{self.counter}.png')
 
         feat1t2[norm1t2 > 0] = feat1t2.clone()[norm1t2 > 0] / norm1t2[norm1t2 > 0]
         feat2t2[norm2t2 > 0] = feat2t2.clone()[norm2t2 > 0] / norm2t2[norm2t2 > 0]
@@ -145,8 +134,6 @@ class AnimeInterpNoCupy(nn.Module):
 
         # synthesis
         It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
-
-        # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
 
         return It_warp, F12, F21, F12in, F21in
 

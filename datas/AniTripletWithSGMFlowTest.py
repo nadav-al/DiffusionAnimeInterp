@@ -54,6 +54,7 @@ def _make_dataset(dir, dirf):
         # framesPath[index].append(os.path.join(clipsFolderPath, 'frame2.jpg'))
         # framesPath[index].append(os.path.join(clipsFolderPath, 'frame3.jpg'))
 
+        # guide_flo13.npy
         flowPath[index].append(os.path.join(flowFolderPath, 'guide_flo13.npy'))
         # guide_flo31.npy
         flowPath[index].append(os.path.join(flowFolderPath, 'guide_flo31.npy'))
