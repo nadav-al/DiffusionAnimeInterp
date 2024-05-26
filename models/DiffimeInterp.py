@@ -57,6 +57,10 @@ class DiffimeInterp(nn.Module):
         self.fwarp = ForwardWarp('summation')
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
 
+        normalize1 = TF.Normalize(config.mean, [1.0, 1.0, 1.0])
+        normalize2 = TF.Normalize([0, 0, 0], config.std)
+        self.trans = TF.Compose([TF.ToTensor(), normalize1, normalize2, ])
+
         revmean = [-x for x in config.mean]
         revstd = [1.0 / x for x in config.std]
         revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
@@ -176,11 +180,21 @@ class DiffimeInterp(nn.Module):
 
         # diffusion
         if self.diff_objective == "latent":
+            I1t_im = self.revtrans(I1t)
+            I2t_im = self.revtrans(I2t)
             dI1t = self.pipline("High quality. 2D classic animation. Clean. ",
-                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t).images[0]
+                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t_im).images[0]
             dI2t = self.pipline("High quality. 2D classic animation. Clean. ",
-                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t).images[0]
+                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t_im).images[0]
 
+            I1t_im.save(self.store_path + f'latents/fold{self.counter}/I1t.png')
+            I2t_im.save(self.store_path + f'latents/fold{self.counter}/I2t.png')
+            dI1t.save(self.store_path + f'latents/fold{self.counter}/dI1t.png')
+            dI2t.save(self.store_path + f'latents/fold{self.counter}/dI2t.png')
+            self.counter += 1
+
+            dI1t = self.trans(dI1t)
+            dI2t = self.trans(dI2t)
             # synthesis
             It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
 

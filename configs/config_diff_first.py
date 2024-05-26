@@ -29,7 +29,7 @@ diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
 
 diff_objective = "latent"
 
-store_path = 'outputs/diffusion_test1'
+store_path = 'outputs/diffusion_test1/'
 
 
 

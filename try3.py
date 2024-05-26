@@ -123,11 +123,6 @@ def validate(config):
             x = num_of_frames
             for tt in range(num_of_frames):
                 t = 1.0 / (x + 1) * (tt + 1)
-		
-                print(I1.device)
-                print(I2.device)
-                print(F12i.device)
-                print(F21i.device)
                 outputs = model(I1, I2, F12i, F21i, t)
 
                 It_warp = outputs[0]
