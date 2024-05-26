@@ -5,10 +5,10 @@
 # test_annotation_root = prefix + 'datasets/test_2k_annotations/'
 
 # prefix = 'D:/University/ForthYear/GuidedProject/other_animations'
-# prefix = 'Datasets_root/other_animations/'
-prefix = ''
-testset_root = prefix + 'other_animations/full_shots/'
-test_flow_root = prefix + 'outputs/AoT_sgm_flows/'
+prefix = 'Datasets_root/other_animations/'
+# prefix = ''
+testset_root = prefix + 'full_shots/'
+test_flow_root = prefix + 'AoT_sgm_flows/'
 
 test_size = (960, 540)
 test_crop_size = (960, 540)
@@ -24,8 +24,8 @@ model = 'DiffimeInterp'
 pwc_path = None
 
 checkpoint = 'checkpoints/anime_interp_full.ckpt'
-# diff_path = 'checkpoints/diffusers/runwayml/stable-diffusion-v1-5'
-diff_path = 'runwayml/stable-diffusion-v1-5'
+diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
+# diff_path = 'runwayml/stable-diffusion-v1-5'
 
 diff_objective = None
 

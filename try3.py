@@ -54,7 +54,7 @@ def validate(config):
     sys.stdout.flush()
 
     # prepare model
-    if torch.cuda.is_available():
+    if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
         model = getattr(models, config.model)(config.pwc_path).cuda()
     else:
         model = getattr(models, config.model)(config.pwc_path, config=config)
