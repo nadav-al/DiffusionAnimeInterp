@@ -27,7 +27,7 @@ checkpoint = 'checkpoints/anime_interp_full.ckpt'
 diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
 # diff_path = 'runwayml/stable-diffusion-v1-5'
 
-diff_objective = None
+diff_objective = "latent"
 
 store_path = 'outputs/diffusion_test1'
 

@@ -64,7 +64,7 @@ class DiffimeInterp(nn.Module):
         self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
         self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
 
-        # self.diff_objective = config.diff_objective
+        self.diff_objective = config.diff_objective
         print("loading diffuser")
         if base_diff is not None:
             self.pipline = AutoPipelineForImage2Image(**base_diff.components).to("cuda")
@@ -175,14 +175,21 @@ class DiffimeInterp(nn.Module):
 
 
         # diffusion
-        dI1t = self.pipline("High quality. 2D classic animation. Clean. ",
-                            negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t)
-        dI2t = self.pipline("High quality. 2D classic animation. Clean. ",
-                            negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t)
+        if self.diff_objective == "latent":
+            dI1t = self.pipline("High quality. 2D classic animation. Clean. ",
+                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t).images[0]
+            dI2t = self.pipline("High quality. 2D classic animation. Clean. ",
+                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t).images[0]
 
-        # synthesis
-        It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
+            # synthesis
+            It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
 
+        else:
+            # synthesis
+            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1),
+                                  torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
+
+            It_warp = self.pipline("High quality. 2D classic animation. Clean. ", image=It_warp).images[0]
 
 
         return It_warp, F12, F21, F12in, F21in

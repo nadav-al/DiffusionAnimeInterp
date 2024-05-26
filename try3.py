@@ -91,13 +91,18 @@ def validate(config):
 
             # initial SGM flow
             F12i, F21i = flow
-
-            F12i = F12i.float()
-            F21i = F21i.float()
-
             ITs = [sample[tt] for tt in range(1, 2)]
-            I1 = first_frame
-            I2 = last_frame
+
+            if torch.cuda.is_available():
+                F12i = F12i.float().cuda()
+                F21i = F21i.float().cuda()
+                I1 = first_frame.cuda()
+                I2 = last_frame.cuda()
+            else:
+                F12i = F12i.float()
+                F21i = F21i.float()
+                I1 = first_frame
+                I2 = last_frame
 
             num_of_frames = config.inter_frames
 
