@@ -18,7 +18,9 @@ def _make_dataset(dir, dirf):
     framesIndex = []
     framesFolder = []
     # Find and loop over all the clips in root `dir`.
-    for index, folder in enumerate(os.listdir(dir)):
+    for index, folder in enumerate(os.listdir(dir)[:1887]):
+        if folder == "Japan_v2_2_053853_s3":
+            continue
         clipsFolderPath = os.path.join(dir, folder)
         flowFolderPath = os.path.join(dirf, folder)
         # Skip items which are not folders.
@@ -28,12 +30,12 @@ def _make_dataset(dir, dirf):
         flowPath.append([])
         framesIndex.append([])
         framesFolder.append([])
-        
+
         # Find and loop over all the frames inside the clip.
         # for image in sorted(os.listdir(clipsFolderPath)):
         #     # Add path to list.
 
-        
+
 
         for image in sorted(os.listdir(clipsFolderPath)):
             # Add path to list.
@@ -56,6 +58,7 @@ def _make_dataset(dir, dirf):
 
         # guide_flo13.npy
         flowPath[index].append(os.path.join(flowFolderPath, 'guide_flo13.npy'))
+
         # guide_flo31.npy
         flowPath[index].append(os.path.join(flowFolderPath, 'guide_flo31.npy'))
     # print(framesPath)
@@ -81,9 +84,10 @@ def _pil_loader(path, cropArea=None, resizeDim=None, frameFlip=0):
 
         return flipped_img.convert('RGB')
 
-def _flow_loader(path, cropArea=None, resizeDim=None, frameFlip=0, shiftX=0, shiftY=0):
-    flow_np = np.load(path)
-    flow = torch.from_numpy(flow_np) 
+def _flow_loader(flow_path, cropArea=None, resizeDim=None, frameFlip=0, shiftX=0, shiftY=0):
+    flow_np = np.load(flow_path)
+
+    flow = torch.from_numpy(flow_np)
     # print(flow.size())
     flow = F.interpolate(flow[None], size=(resizeDim[1],resizeDim[0]))[0]
 
@@ -93,7 +97,7 @@ def _flow_loader(path, cropArea=None, resizeDim=None, frameFlip=0, shiftX=0, shi
 
         flow[0, :, :] *= factor0
         flow[1, :, :] *= factor1
-    
+
     if cropArea is not None:
         flow = flow[:, cropArea[1]:cropArea[3], cropArea[0]:cropArea[2]]
 
@@ -104,8 +108,8 @@ def _flow_loader(path, cropArea=None, resizeDim=None, frameFlip=0, shiftX=0, shi
         flow = torch.flip(flow, [2])
         flow[0] *= -1
     return flow.clone().detach()
-    
-    
+
+
 class AniTripletWithSGMFlowTest(data.Dataset):
     def __init__(self, root, root_flow, transform=None, resizeSize=(640, 360), randomCropSize=(352, 352), train=True, shift=0):
         # Populate the list with image paths for all the
@@ -114,7 +118,7 @@ class AniTripletWithSGMFlowTest(data.Dataset):
         # Raise error if no images found in root.
         if len(framesPath) == 0:
             raise(RuntimeError("Found 0 files in subfolders of: " + root + "\n"))
-                
+
         self.randomCropSize = randomCropSize
         self.cropX0         = resizeSize[0] - randomCropSize[0]
         self.cropY0         = resizeSize[1] - randomCropSize[1]
@@ -137,30 +141,30 @@ class AniTripletWithSGMFlowTest(data.Dataset):
 
         indeces = []
         folders = []
-        
+
         if (self.train):
             ### Data Augmentation ###
             # To select random 9 frames from 12 frames in a clip
             firstFrame = 0
             # Apply random crop on the 9 input frames
 
-            
+
             shiftX = random.randint(0, self.shift)//2 * 2
             shiftY = random.randint(0, self.shift)//2 * 2
             shiftX = shiftX * -1 if random.randint(0, 1) > 0 else shiftX
             shiftY = shiftY * -1 if random.randint(0, 1) > 0 else shiftY
             # shiftX = 0
             # shiftY = 0
-            # print(shiftX, shiftY)            
+            # print(shiftX, shiftY)
 
             cropX0 = random.randint(max(0, -shiftX), min(self.cropX0 - shiftX, self.cropX0))
             cropY0 = random.randint(max(0, -shiftY), min(self.cropY0, self.cropY0 - shiftY))
-            
+
 
             cropArea.append((cropX0, cropY0, cropX0 + self.randomCropSize[0], cropY0 + self.randomCropSize[1]))
             cropArea.append((cropX0 + shiftX//2, cropY0 + shiftY//2, cropX0 + shiftX//2 + self.randomCropSize[0], cropY0 + shiftY//2 + self.randomCropSize[1]))
             cropArea.append((cropX0 + shiftX, cropY0 + shiftY, cropX0 + shiftX + self.randomCropSize[0], cropY0 + shiftY + self.randomCropSize[1]))
-            
+
             shifts.append((shiftX, shiftY))
             shifts.append((-shiftX, -shiftY))
             # inter = random.randint(1)
@@ -192,7 +196,7 @@ class AniTripletWithSGMFlowTest(data.Dataset):
             randomFrameFlip = 0
             inter = 1
             shifts = [(0, 0), (0, 0)]
-        
+
         # Loop over for all frames corresponding to the `index`.
         for frameIndex in frameRange:
             # Open image using pil and augment the image.
@@ -207,7 +211,7 @@ class AniTripletWithSGMFlowTest(data.Dataset):
 
             folder = self.framesFolder[index][frameIndex]
             iindex = self.framesIndex[index][frameIndex]
-            
+
             indeces.append(iindex)
             folders.append(folder)
 
@@ -241,4 +245,4 @@ class AniTripletWithSGMFlowTest(data.Dataset):
         tmp = '    Transforms (if any): '
         fmt_str += '{0}{1}\n'.format(tmp, self.transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
         return fmt_str
-    
+

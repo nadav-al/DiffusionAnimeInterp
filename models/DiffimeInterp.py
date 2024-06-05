@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torchvision import transforms as TF
 import numpy as np
 import sys
+import os
 import argparse
 
 from .rfr_model.rfr_new import RFR as RFR
@@ -11,6 +12,7 @@ from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
+from diffusers import StableDiffusionImg2ImgPipeline
 
 
 
@@ -44,7 +46,7 @@ class FeatureExtractor(nn.Module):
 
 class DiffimeInterp(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, base_diff=None, args=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, init_diff=True, args=None):
         super(DiffimeInterp, self).__init__()
 
         args = argparse.Namespace()
@@ -57,6 +59,16 @@ class DiffimeInterp(nn.Module):
         self.fwarp = ForwardWarp('summation')
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
 
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
+        if config.seed is not None:
+            self.generator = torch.manual_seed(config.seed)
+        else:
+            self.generator = None
+
         normalize1 = TF.Normalize(config.mean, [1.0, 1.0, 1.0])
         normalize2 = TF.Normalize([0, 0, 0], config.std)
         self.trans = TF.Compose([TF.ToTensor(), normalize1, normalize2, ])
@@ -68,18 +80,10 @@ class DiffimeInterp(nn.Module):
         self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
         self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
 
-        self.diff_objective = config.diff_objective
-        print("loading diffuser")
-        if base_diff is not None:
-            self.pipline = AutoPipelineForImage2Image(**base_diff.components).to("cuda")
-            pass
-        else:
-            self.pipline = AutoPipelineForImage2Image.from_pretrained(config.diff_path, torch_dtype=torch.float16,
-                                                                      variant="fp16", use_safetensors=True).to("cuda")
-        print("diffuser loaded")
-        self.pipline.enable_model_cpu_offload()
-
-        self.store_path = config.store_path
+        self.config = config
+        if init_diff:
+            self.load_diffuser()
+        # self.store_path = config.store_path
         self.counter = 0
 
         if path is not None:
@@ -88,6 +92,31 @@ class DiffimeInterp(nn.Module):
             for key in dict1:
                 dict2[key[7:]] = dict1[key]
             self.flownet.load_state_dict(dict2, strict=False)
+
+    def load_diffuser(self, type="image", controlnet=None):
+        print("loading diffuser")
+        if controlnet is not None:
+            if type == "image":
+                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
+                                                                           controlnet=controlnet,
+                                                                           torch_dtype=torch.bfloat16, variant="fp16",
+                                                                           use_safetensors=True).to("cuda")
+            elif type == "text":
+                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
+                                                                          controlnet=controlnet,
+                                                                          torch_dtype=torch.bfloat16, variant="fp16",
+                                                                          use_safetensors=True).to("cuda")
+        else:
+            if type == "image":
+                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
+                                                                           torch_dtype=torch.bfloat16, variant="fp16",
+                                                                           use_safetensors=True).to("cuda")
+            elif type == "text":
+                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
+                                                                          torch_dtype=torch.bfloat16, variant="fp16",
+                                                                          use_safetensors=True).to("cuda")
+        print("diffuser loaded")
+        self.pipeline.enable_model_cpu_offload()
 
     def dflow(self, flo, target):
         tmp = F.interpolate(flo, target.size()[2:4])
@@ -125,88 +154,129 @@ class DiffimeInterp(nn.Module):
         Ftdd = self.dflow(Ft, features[1])
         Ftddd = self.dflow(Ft, features[2])
 
-        return F12, F12in, Ft, Ftd, Ftdd, Ftddd
+        return F12, F12in, [Ft.cuda(), Ftd.cuda(), Ftdd.cuda(), Ftddd.cuda()]
 
-    def forward(self, I1, I2, F12i, F21i, t):
+
+    def warping(self, Fts, I, features):
+        Ft, Ftd, Ftdd, Ftddd = Fts
+        feat1, feat2, feat3 = features
+
+        one0 = torch.ones(I.size(), requires_grad=True).cuda()
+        one1 = torch.ones(feat1.size(), requires_grad=True).cuda()
+        one2 = torch.ones(feat2.size(), requires_grad=True).cuda()
+        one3 = torch.ones(feat3.size(), requires_grad=True).cuda()
+
+        I = I.cuda()
+
+
+        It = self.fwarp(I, Ft)
+        feat_t1 = self.fwarp(feat1, Ftd)
+        feat_t2 = self.fwarp(feat2, Ftdd)
+        feat_t3 = self.fwarp(feat3, Ftddd)
+
+        norm = self.fwarp(one0, Ft.clone())
+        norm_t1 = self.fwarp(one1, Ftd.clone())
+        norm_t2 = self.fwarp(one2, Ftdd.clone())
+        norm_t3 = self.fwarp(one3, Ftddd.clone())
+
+        return It, [feat_t1, feat_t2, feat_t3], norm, [norm_t1, norm_t2, norm_t3]
+
+    def normalize(self, It, feat_t, norm, norm_t):
+        It[norm > 0] = It.clone()[norm > 0] / norm[norm > 0]
+        feat_t[0][norm_t[0] > 0] = feat_t[0].clone()[norm_t[0] > 0] / norm_t[0][norm_t[0] > 0]
+        feat_t[1][norm_t[1] > 0] = feat_t[1].clone()[norm_t[1] > 0] / norm_t[1][norm_t[1] > 0]
+        feat_t[2][norm_t[2] > 0] = feat_t[2].clone()[norm_t[2] > 0] / norm_t[2][norm_t[2] > 0]
+
+    def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder):
+        I1t_im = self.revtrans(I1t.cpu()[0])
+        I2t_im = self.revtrans(I2t.cpu()[0])
+        I1t_im = I1t_im.resize((1024,1024))
+        I2t_im = I2t_im.resize((1024,1024))
+        dI1t = self.pipeline("2D cartoon. Hand drawn animation. Frame by Frame. Disney. Anime",
+                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
+                             num_inferece_steps=30, image=I1t_im).images[0]
+        dI2t = self.pipeline("2D cartoon. Hand drawn animation. Frame by Frame. Disney. Anime",
+                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
+                             num_inferece_steps=30, image=I2t_im).images[0]
+
+        # resize
+        dI1t = dI1t.resize(self.config.test_size)
+        dI2t = dI2t.resize(self.config.test_size)
+
+
+        path = self.config.store_path + '/' + folder[0][0] + '/latents'
+        if not os.path.exists(path):
+            os.mkdir(path)
+        I1t_im.save(path + '/I1t.png')
+        I2t_im.save(path + '/I2t.png')
+        dI1t.save(path + '/dI1t.png')
+        dI2t.save(path + '/dI2t.png')
+        self.counter += 1
+        dI1t = self.trans(dI1t.convert('RGB')).to(self.device).unsqueeze(0)
+        dI2t = self.trans(dI2t.convert('RGB')).to(self.device).unsqueeze(0)
+        # synthesis
+        return self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                              torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
+
+
+
+
+    def forward(self, I1, I2, F12i, F21i, t, folder=None):
         # extract features
         I1o, features1, I2o, features2 = self.extract_features_2_frames(I1, I2)
         feat11, feat12, feat13 = features1
         feat21, feat22, feat23 = features2
 
         # calculate motion
-        F12, F12in, F1t, F1td, F1tdd, F1tddd = self.motion_calculation(I1o, I2o, F12i, [feat11, feat12, feat13], t, 0)
-        F21, F21in, F2t, F2td, F2tdd, F2tddd = self.motion_calculation(I2o, I1o, F21i, [feat21, feat22, feat23], t, 1)
+        F12, F12in, F1ts = self.motion_calculation(I1o, I2o, F12i, [feat11, feat12, feat13], t, 0)
+        F21, F21in, F2ts = self.motion_calculation(I2o, I1o, F21i, [feat21, feat22, feat23], t, 1)
 
         # warping 
-        one0 = torch.ones(I1.size(), requires_grad=True).cuda()
-        one1 = torch.ones(feat11.size(), requires_grad=True).cuda()
-        one2 = torch.ones(feat12.size(), requires_grad=True).cuda()
-        one3 = torch.ones(feat13.size(), requires_grad=True).cuda()
-
-        I1t = self.fwarp(I1, F1t)
-        feat1t1 = self.fwarp(feat11, F1td)
-        feat1t2 = self.fwarp(feat12, F1tdd)
-        feat1t3 = self.fwarp(feat13, F1tddd)
-
-        I2t = self.fwarp(I2, F2t)
-        feat2t1 = self.fwarp(feat21, F2td)
-        feat2t2 = self.fwarp(feat22, F2tdd)
-        feat2t3 = self.fwarp(feat23, F2tddd)
-
-        norm1 = self.fwarp(one0, F1t.clone())
-        norm1t1 = self.fwarp(one1, F1td.clone())
-        norm1t2 = self.fwarp(one2, F1tdd.clone())
-        norm1t3 = self.fwarp(one3, F1tddd.clone())
-
-        norm2 = self.fwarp(one0, F2t.clone())
-        norm2t1 = self.fwarp(one1, F2td.clone())
-        norm2t2 = self.fwarp(one2, F2tdd.clone())
-        norm2t3 = self.fwarp(one3, F2tddd.clone())
+        I1t, feat1t, norm1, norm1t = self.warping(F1ts, I1, features1)
+        I2t, feat2t, norm2, norm2t = self.warping(F2ts, I2, features2)
 
         # normalize
         # Note: normalize in this way benefit training than the original "linear"
-        I1t[norm1 > 0] = I1t.clone()[norm1 > 0] / norm1[norm1 > 0]
-        I2t[norm2 > 0] = I2t.clone()[norm2 > 0] / norm2[norm2 > 0]
-        
-        feat1t1[norm1t1 > 0] = feat1t1.clone()[norm1t1 > 0] / norm1t1[norm1t1 > 0]
-        feat2t1[norm2t1 > 0] = feat2t1.clone()[norm2t1 > 0] / norm2t1[norm2t1 > 0]
-        
-        feat1t2[norm1t2 > 0] = feat1t2.clone()[norm1t2 > 0] / norm1t2[norm1t2 > 0]
-        feat2t2[norm2t2 > 0] = feat2t2.clone()[norm2t2 > 0] / norm2t2[norm2t2 > 0]
-        
-        feat1t3[norm1t3 > 0] = feat1t3.clone()[norm1t3 > 0] / norm1t3[norm1t3 > 0]
-        feat2t3[norm2t3 > 0] = feat2t3.clone()[norm2t3 > 0] / norm2t3[norm2t3 > 0]
+        self.normalize(I1t, feat1t, norm1, norm1t)
+        self.normalize(I2t, feat2t, norm2, norm2t)
 
 
         # diffusion
-        if self.diff_objective == "latent":
-            I1t_im = self.revtrans(I1t)
-            I2t_im = self.revtrans(I2t)
-            dI1t = self.pipline("High quality. 2D classic animation. Clean. ",
-                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I1t_im).images[0]
-            dI2t = self.pipline("High quality. 2D classic animation. Clean. ",
-                                negative_prompt="Distorted. Black Spots. Bad Quality. ", image=I2t_im).images[0]
+        if self.config.diff_objective == "latents":
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder)
 
-            I1t_im.save(self.store_path + f'latents/fold{self.counter}/I1t.png')
-            I2t_im.save(self.store_path + f'latents/fold{self.counter}/I2t.png')
-            dI1t.save(self.store_path + f'latents/fold{self.counter}/dI1t.png')
-            dI2t.save(self.store_path + f'latents/fold{self.counter}/dI2t.png')
-            self.counter += 1
-
-            dI1t = self.trans(dI1t)
-            dI2t = self.trans(dI2t)
+        elif self.config.diff_objective == "result":
             # synthesis
-            It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1), torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
+            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                                  torch.cat([feat1t[1], feat2t[1]], dim=1),
+                                  torch.cat([feat1t[2], feat2t[2]], dim=1))
+            It_warp = self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)
+            It_warp = self.pipeline("2D cartoon. Hand-Drawn animation. Frame by Frame. Disney. Anime",
+                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
+                                    num_inferece_steps=60, image=It_warp).images[0]
+            It_warp = It_warp.resize(self.config.test_size)
+            It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
+
+        elif self.config.diff_objective == "both":
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder)
+            It_warp = self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)
+            It_warp = It_warp.resize((1024,1024))
+            It_warp = self.pipeline("2D cartoon. Hand-Drawn animation. Frame by Frame. Disney. Anime",
+                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
+                                    num_inferece_steps=60, image=It_warp).images[0]
+            It_warp = It_warp.resize(self.config.test_size)
+            It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 
         else:
-            # synthesis
-            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t1, feat2t1], dim=1),
-                                  torch.cat([feat1t2, feat2t2], dim=1), torch.cat([feat1t3, feat2t3], dim=1))
-
-            It_warp = self.pipline("High quality. 2D classic animation. Clean. ", image=It_warp).images[0]
+            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                                  torch.cat([feat1t[1], feat2t[1]], dim=1),
+                                  torch.cat([feat1t[2], feat2t[2]], dim=1))
 
 
         return It_warp, F12, F21, F12in, F21in
+
+
+
 
 
 

@@ -379,7 +379,7 @@ if __name__ == "__main__":
     folder_root = args.input_root
     save_root = args.output_root
 
-    label_root = args.label_root 
+    label_root = args.label_root
 
     start_idx = int(args.start_idx)
     end_idx = None if args.end_idx is None else int(args.end_idx)
@@ -399,7 +399,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_root):
         os.makedirs(save_root)
 
-    ## make models 
+    ## make models
     vggNet = create_VGGFeatNet()
     if use_gpu:
         vggNet = vggNet.cuda()
@@ -415,13 +415,16 @@ if __name__ == "__main__":
         end_idx = len(folderList)
 
     for f_idx, folder in enumerate(folderList[start_idx:end_idx]):
+        if os.path.isfile(os.path.join(save_root, folder, 'guide_flo13.npy')) and \
+                os.path.isfile(os.path.join(save_root, folder, 'guide_flo31.npy')):
+            continue
         f_idx += start_idx
         # if f_idx > 1 + start_idx:
         #     break
 
         input_subfolder = os.path.join(folder_root, folder)
         imgFileNames = sorted(os.listdir(input_subfolder))
-        
+
         print('-- [%d/%d] %s'%(f_idx, end_idx-1, folder))
         print(imgFileNames)
         sys.stdout.flush()
@@ -510,7 +513,7 @@ if __name__ == "__main__":
         featx4_pool_3 = superpixel_pooling(featx4_3[0], labelMap3_x4, use_gpu)
         featx8_pool_3 = superpixel_pooling(featx8_3[0], labelMap3_x8, use_gpu)
         # featx16_pool_3 = superpixel_pooling(featx16_3[0], labelMap3_x16, use_gpu)
-        
+
         feat_pool_1 = torch.cat([featx1_pool_1, featx2_pool_1, featx4_pool_1, featx8_pool_1], dim=0)
         feat_pool_3 = torch.cat([featx1_pool_3, featx2_pool_3, featx4_pool_3, featx8_pool_3], dim=0)
 
@@ -570,14 +573,14 @@ if __name__ == "__main__":
                 # pixel number as similarity
                 num_1 = float(pixelCounts_1[x])
                 num_3 = float(pixelCounts_3[y])
-                
+
                 sizeDiff = max(num_1/num_3, num_3/num_1)
                 if sizeDiff > 3:
                     corrMap[x,y] -= sizeDiff/20
 
                 # spatial distance as similarity
                 dist = np.linalg.norm([mean_X_1[x] - mean_X_3[y], mean_Y_1[x] - mean_Y_3[y]])/maxDist
-                
+
                 if dist > 0.14:
                     corrMap[x,y] -= dist/5
 
@@ -598,18 +601,18 @@ if __name__ == "__main__":
         # create flows
         guideflow_1to3, matching_color_1to3 = get_guidance_flow(labelMap1, labelMap3, img1_rs, img3_rs,
                                 rankSum_1to3, matching_1to3, sortedCorrMap_1,
-                                mean_X_1, mean_Y_1, mean_X_3, mean_Y_3, 
+                                mean_X_1, mean_Y_1, mean_X_3, mean_Y_3,
                                 rank_sum_thr = rankSumThr, use_gpu = use_gpu)
         guideflow_3to1, matching_color_3to1 = get_guidance_flow(labelMap3, labelMap1, img3_rs, img1_rs,
-                                rankSum_3to1, matching_3to1, sortedCorrMap_3.transpose(1,0), 
-                                mean_X_3, mean_Y_3, mean_X_1, mean_Y_1, 
+                                rankSum_3to1, matching_3to1, sortedCorrMap_3.transpose(1,0),
+                                mean_X_3, mean_Y_3, mean_X_1, mean_Y_1,
                                 rank_sum_thr = rankSumThr, use_gpu = use_gpu)
 
         # save flows
         saveFolder = os.path.join(save_root, folder)
         if not os.path.exists(saveFolder):
             os.mkdir(saveFolder)
-        
+
         flow13_savePath = os.path.join(saveFolder, 'guide_flo13.npy')
         flow31_savePath = os.path.join(saveFolder, 'guide_flo31.npy')
         np.save(flow13_savePath, guideflow_1to3)

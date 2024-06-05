@@ -24,7 +24,7 @@ def save_flow_to_img(flow, des):
     cv2.imwrite(des + '.jpg', cf)
 
 
-def validate(config, lora_config):
+def validate(config):
     # preparing datasets & normalization
     normalize1 = TF.Normalize(config.mean, [1.0, 1.0, 1.0])
     normalize2 = TF.Normalize([0, 0, 0], config.std)
@@ -58,10 +58,8 @@ def validate(config, lora_config):
 
     # prepare model
     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-        print("ok")
         model = getattr(models, config.model)(config.pwc_path).to(device)
     else:
-        print("why??")
         model = getattr(models, config.model)(config.pwc_path, config=config).to(device)
     model = nn.DataParallel(model)
     retImg = []
@@ -102,33 +100,20 @@ def validate(config, lora_config):
             F21i = F21i.float().to(device)
             I1 = first_frame.to(device)
             I2 = last_frame.to(device)
-            #if torch.cuda.is_available():
-            #    F12i = F12i.float().cuda()
-            #    F21i = F21i.float().cuda()
-            #    I1 = first_frame.cuda()
-            #    I2 = last_frame.cuda()
-            #else:
-            #    F12i = F12i.float()
-            #    F21i = F21i.float()
-            #    I1 = first_frame
-            #    I2 = last_frame
 
-            num_of_frames = config.inter_frames
 
             if not os.path.exists(config.store_path + '/' + folder[0][0]):
                 os.mkdir(config.store_path + '/' + folder[0][0])
 
+            x = config.inter_frames
+
             # save the first and last frame
             revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
-            revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
+            revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{x + 2}.png')
 
-            x = num_of_frames
-            for tt in range(num_of_frames):
+            for tt in range(x):
                 t = 1.0 / (x + 1) * (tt + 1)
-                if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-                    outputs = model(I1, I2, F12i, F21i, t)
-                else:
-                    outputs = model(I1, I2, F12i, F21i, t, folder)
+                outputs = model(I1, I2, F12i, F21i, t)
 
                 It_warp = outputs[0]
 
@@ -146,13 +131,10 @@ if __name__ == "__main__":
     # loading configures
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
-    # parser.add_argument('lora_config', default='configs/LoRA/lora_config_base.py')
-    args, _ = parser.parse_known_args()
+    args = parser.parse_args()
     config = Config.from_file(args.config)
-    # lora_config = Config.from_file(args.lora_config)
-    lora_config=None
 
     if not os.path.exists(config.store_path):
         os.mkdir(config.store_path)
 
-    validate(config, lora_config)
+    validate(config)
