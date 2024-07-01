@@ -24,7 +24,7 @@ def save_flow_to_img(flow, des):
     cv2.imwrite(des + '.jpg', cf)
 
 
-def validate(config, lora_config):
+def validate(config, args):
     # preparing datasets & normalization
     normalize1 = TF.Normalize(config.mean, [1.0, 1.0, 1.0])
     normalize2 = TF.Normalize([0, 0, 0], config.std)
@@ -53,16 +53,14 @@ def validate(config, lora_config):
     validationloader = torch.utils.data.DataLoader(testset, sampler=sampler, batch_size=1, shuffle=False, num_workers=1)
     to_img = TF.ToPILImage()
 
-    print(testset)
+    # print(testset)
     sys.stdout.flush()
 
     # prepare model
     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-        print("ok")
         model = getattr(models, config.model)(config.pwc_path).to(device)
     else:
-        print("why??")
-        model = getattr(models, config.model)(config.pwc_path, config=config).to(device)
+        model = getattr(models, config.model)(config.pwc_path, config=config, args=args).to(device)
     model = nn.DataParallel(model)
     retImg = []
 
@@ -89,6 +87,7 @@ def validate(config, lora_config):
             print('Testing {}/{}-th group...'.format(validationIndex+1, len(testset)))
             sys.stdout.flush()
             sample, flow, index, folder = validationData
+
             first_frame = sample[0]
             last_frame = sample[-1]
 
@@ -102,16 +101,6 @@ def validate(config, lora_config):
             F21i = F21i.float().to(device)
             I1 = first_frame.to(device)
             I2 = last_frame.to(device)
-            #if torch.cuda.is_available():
-            #    F12i = F12i.float().cuda()
-            #    F21i = F21i.float().cuda()
-            #    I1 = first_frame.cuda()
-            #    I2 = last_frame.cuda()
-            #else:
-            #    F12i = F12i.float()
-            #    F21i = F21i.float()
-            #    I1 = first_frame
-            #    I2 = last_frame
 
             num_of_frames = config.inter_frames
 
@@ -155,4 +144,4 @@ if __name__ == "__main__":
     if not os.path.exists(config.store_path):
         os.mkdir(config.store_path)
 
-    validate(config, lora_config)
+    validate(config, args)

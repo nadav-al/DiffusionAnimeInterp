@@ -1,20 +1,17 @@
 import argparse
 import os
-from datas.LoraDataset import LoraDataset
+import random
+
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 import torch
-import torch.nn.functional as F
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    StableDiffusionXLPipeline,
-    UNet2DConditionModel,
-)
-from transformers import CLIPTextModel, CLIPTokenizer
-from diffusers.optimization import get_scheduler
-from peft import LoraConfig, set_peft_model_state_dict
-from tqdm.auto import tqdm
-
+from diffusers import UNet2DConditionModel
+from peft import LoraConfig, get_peft_model, TaskType
+from transformers import Trainer, TrainingArguments, AutoTokenizer, get_scheduler
+from torchvision import transforms as TF
+from torchvision.transforms.functional import crop
+from datasets import load_dataset, Dataset, Features, Image, Value
+from datas.LoraDataset import LoraDataset
 
 def parse_args(input_args=None):
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
@@ -80,7 +77,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--resolution",
         type=int,
-        default=1024,
+        default=512,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
@@ -127,6 +124,11 @@ def parse_args(input_args=None):
         default=None,
         help=("Max number of checkpoints to store."),
     )
+    parser.add_argument(
+        "--logging_steps",
+        type=int,
+        default=150,
+        )
     parser.add_argument(
         "--resume_from_checkpoint",
         type=str,
@@ -244,217 +246,212 @@ def parse_args(input_args=None):
     return args
 
 
-def tokenize_prompt(tokenizer, prompt):
-    text_inputs = tokenizer(
-        prompt,
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
-        return_tensors="pt",
-    )
-    text_input_ids = text_inputs.input_ids
-    return text_input_ids
 
-# Adapted from pipelines.StableDiffusionXLPipeline.encode_prompt
-def encode_prompt(text_encoders, tokenizers, prompt,   text_input_ids_list=None):
-    prompt_embeds_list = []
-
-    for i, text_encoder in enumerate(text_encoders):
-        if tokenizers is not None:
-            tokenizer = tokenizers[i]
-            text_input_ids = tokenize_prompt(tokenizer, prompt)
-        else:
-            assert text_input_ids_list is not None
-            text_input_ids = text_input_ids_list[i]
-
-        prompt_embeds = text_encoder(
-            text_input_ids.to(text_encoder.device), output_hidden_states=True, return_dict=False
-        )
-
-        # We are only ALWAYS interested in the pooled output of the final text encoder
-        pooled_prompt_embeds = prompt_embeds[0]
-        prompt_embeds = prompt_embeds[-1][-2]
-        print("prmpt_embeds", prompt_embeds.shape)
-        bs_embed, seq_len, _ = prompt_embeds.shape
-        print("bs_embed", bs_embed)
-        print("seq_len", seq_len)
-        prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
-        prompt_embeds_list.append(prompt_embeds)
-
-    prompt_embeds = torch.cat(prompt_embeds_list, dim=-1)
-    pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
-    return prompt_embeds, pooled_prompt_embeds
-
-
-class LoraTrainerSimpler:
+class LoraT:
     def __init__(self, config, args):
         self.config = config
-        self.args = parse_args(args)
-
-        print("Preparing training")
-
-        # Load the tokenizers
-        self.tokenizer_one = CLIPTokenizer.from_pretrained(
-            config.diff_path,
-            subfolder="tokenizer",
-            revision=self.args.revision,
-            use_fast=False,
-        )
-        self.tokenizer_two = CLIPTokenizer.from_pretrained(
-            config.diff_path,
-            subfolder="tokenizer_2",
-            revision=self.args.revision,
-            use_fast=False,
-        )
-
-        self.text_encoder_one = CLIPTextModel.from_pretrained(self.config.diff_path, subfolder="text_encoder", revision=self.args.revision)
-        self.text_encoder_one.requires_grad_(False)
-        self.text_encoder_one.to("cuda")
-        print("   - first Text Encoder is ready")
-        self.text_encoder_two = CLIPTextModel.from_pretrained(self.config.diff_path, subfolder="text_encoder_2", revision=self.args.revision)
-        self.text_encoder_two.requires_grad_(False)
-        self.text_encoder_two.to("cuda")
-        print("   - second Text Encoder is ready")
-
-        self.noise_scheduler = DDPMScheduler.from_pretrained(self.config.diff_path, subfolder="scheduler")
-        print("   - Noise Scheduler is ready")
-
-        self.vae = AutoencoderKL.from_pretrained(self.config.diff_path, subfolder="vae",
-                                            revision=self.args.revision, variant=self.args.variant)
-        self.vae.requires_grad_(False)
-        self.vae.to("cuda")
-        print("   - VAE is ready")
-
-        self.unet = UNet2DConditionModel.from_pretrained(self.config.diff_path, subfolder="unet", revision=self.args.revision)
+        self.args = parse_args()
+        self.unet = UNet2DConditionModel.from_pretrained(self.config.diff_path, subfolder="unet",
+                                                         revision=self.args.revision)
         self.unet.requires_grad_(False)
         self.unet.to("cuda")
-        print("   - UNet is ready")
+        self.tokenizer_one = AutoTokenizer.from_pretrained(self.config.diff_path, subfolder="tokenizer",
+                                                           revision=self.args.revision, use_fast=False)
+        self.tokenizer_two = AutoTokenizer.from_pretrained(self.config.diff_path, subfolder="tokenizer_2",
+                                                           revision=self.args.revision, use_fast=False)
+        self.preprocess = TF.Compose([
+            TF.Resize((self.args.resolution, self.args.resolution)),
+            TF.RandomHorizontalFlip(),
+            TF.ToTensor(),
+            TF.Normalize([0.5], [0.5]),
+        ])
 
     def __prepare_dataloader(self, input):
-        ds = LoraDataset(input, [self.tokenizer_one, self.tokenizer_two])
+        ds = LoraDataset(input)
+        return ds, DataLoader(ds, shuffle=True, batch_size=self.args.train_batch_size,
+                              num_workers=self.args.dataloader_num_workers)
+
+    def create_dataset(self, path):
+        data = {
+            "image": [],
+            "prompt": []
+        }
+        for i, filename in enumerate(os.listdir(path)):
+            if filename.endswith(".png"):
+                for i in range(self.args.image_repeats):
+                    data["image"].append(os.path.join(path, filename))
+                    data["prompt"].append("an image of AnimeInterp")
+
+        features = Features({
+            "image": Image(),
+            "prompt": Value("string"),
+        })
+
+        ds = Dataset.from_dict(data, features=features)
+
+        def tokenize_prompt(tokenizer, prompt):
+            text_inputs = tokenizer(
+                prompt,
+                padding="max_length",
+                max_length=tokenizer.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            )
+            text_input_ids = text_inputs.input_ids
+            return text_input_ids
+
+        # We need to tokenize input prompts and transform the images.
+        def tokenize_prompts(examples, is_train=True):
+            prompts = examples["prompt"]
+            tokens_one = tokenize_prompt(self.tokenizer_one, prompts)
+            tokens_two = tokenize_prompt(self.tokenizer_two, prompts)
+            return tokens_one, tokens_two
+
+        # Preprocessing the datasets.
+        train_resize = TF.Resize(self.args.resolution, interpolation=TF.InterpolationMode.BILINEAR)
+        train_crop = TF.CenterCrop(self.args.resolution) if self.args.center_crop else TF.RandomCrop(
+            self.args.resolution)
+        train_flip = TF.RandomHorizontalFlip(p=1.0)
+        train_transforms = TF.Compose(
+            [
+                TF.ToTensor(),
+                TF.Normalize([0.5], [0.5]),
+            ]
+        )
+
+        def preprocess_train(examples):
+            images = [image.convert("RGB") for image in examples["image"]]
+            # image aug
+            original_sizes = []
+            all_images = []
+            crop_top_lefts = []
+            for image in images:
+                original_sizes.append((image.height, image.width))
+                image = train_resize(image)
+                if self.args.random_flip and random.random() < 0.5:
+                    # flip
+                    image = train_flip(image)
+                if self.args.center_crop:
+                    y1 = max(0, int(round((image.height - self.args.resolution) / 2.0)))
+                    x1 = max(0, int(round((image.width - self.args.resolution) / 2.0)))
+                    image = train_crop(image)
+                else:
+                    y1, x1, h, w = train_crop.get_params(image, (self.args.resolution, self.args.resolution))
+                    image = crop(image, y1, x1, h, w)
+                crop_top_left = (y1, x1)
+                crop_top_lefts.append(crop_top_left)
+                image = train_transforms(image)
+                all_images.append(image)
+
+            # examples["original_sizes"] = original_sizes
+            # examples["crop_top_lefts"] = crop_top_lefts
+            examples["sample"] = all_images
+            tokens_one, tokens_two = tokenize_prompts(examples)
+            examples["input_ids_one"] = tokens_one
+            examples["input_ids_two"] = tokens_two
+            return examples
+
+        ds = ds.with_transform(preprocess_train)
+
+        return ds
+
+    # def tokenize_captions(self, examples):
+    #     captions = examples["caption"]
+    #     inputs = self.tokenizer(captions, padding="max_length", truncation=True, max_length=77)
+    #     examples["caption"] = inputs
+    #     return examples
+
+    def train(self, tensors, folder, test_size=0.1):
+        folder_path = self.config.testset_root + folder[0][0]
+        dataset = self.create_dataset(folder_path)
+        train_test_split = dataset.train_test_split(test_size=test_size)
+        train_dataset = train_test_split['train']
+        eval_dataset = train_test_split['test']
+
         def collate_fn(examples):
-            pixel_values = torch.stack([example["frames"] for example in examples])
+            pixel_values = torch.stack([example["sample"] for example in examples])
             pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-            original_sizes = [example["original_sizes"] for example in examples]
-            crop_top_lefts = [example["crop_top_lefts"] for example in examples]
+            # original_sizes = [example["original_sizes"] for example in examples]
+            # crop_top_lefts = [example["crop_top_lefts"] for example in examples]
             input_ids_one = torch.stack([example["input_ids_one"] for example in examples])
             input_ids_two = torch.stack([example["input_ids_two"] for example in examples])
             return {
-                "frames": pixel_values,
-                "input_ids_one": input_ids_one,
-                "input_ids_two": input_ids_two,
-                "original_sizes": original_sizes,
-                "crop_top_lefts": crop_top_lefts,
+                "sample": pixel_values,
+                # "input_ids_one": input_ids_one,
+                # "input_ids_two": input_ids_two,
             }
 
-        return DataLoader(ds, shuffle=True, collate_fn=collate_fn,
-                          batch_size=self.args.train_batch_size,
-                          num_workers=self.args.dataloader_num_workers)
+        # DataLoaders creation:
+        train_dataloader = DataLoader(
+            train_dataset,
+            shuffle=True,
+            collate_fn=collate_fn,
+            batch_size=self.args.train_batch_size,
+            num_workers=self.args.dataloader_num_workers,
+        )
 
-    def __train(self, dataloader, folder):
-        args = self.args
-        folder = folder if folder is not None else "AnimeInterp"
-        print("Preparing training")
+        eval_dataloader = DataLoader(
+            eval_dataset,
+            shuffle=True,
+            collate_fn=collate_fn,
+            batch_size=self.args.train_batch_size,
+            num_workers=self.args.dataloader_num_workers,
+        )
+
+
         unet_lora_config = LoraConfig(
-            r=args.rank,
-            lora_alpha=args.rank,
+            r=self.args.rank,
+            lora_alpha=self.args.rank,
+            inference_mode=False,
             init_lora_weights="gaussian",
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
-        self.unet.add_adapter(unet_lora_config)
-        print("   - Clean LoRA weights are loaded")
+        model = get_peft_model(self.unet, unet_lora_config)
 
-        params_to_optimize = list(filter(lambda p: p.requires_grad, self.unet.parameters()))
-        optimizer = torch.optim.AdamW(
-            params_to_optimize,
-            lr=args.learning_rate,
-            betas=(args.adam_beta1, args.adam_beta2),
-            weight_decay=args.adam_weight_decay,
-            eps=args.adam_epsilon,
-        )
-        print("   - Optimizer is ready")
-        lr_scheduler = get_scheduler(
-            args.lr_scheduler,
+        # training_args = TrainingArguments(
+        #     output_dir=f"./checkpoints/diffusers/adapters/LoRAs/{folder}/",
+        #     per_device_train_batch_size=self.args.train_batch_size,
+        #     per_device_eval_batch_size=self.args.train_batch_size,
+        #     num_train_epochs=self.args.num_train_epochs,
+        #     eval_strategy="steps",
+        #     save_steps=self.args.checkpointing_steps,
+        #     save_total_limit=self.args.checkpoints_total_limit,
+        #     logging_dir=f"./outputs/logs/{folder}",
+        # )
+        # trainer = Trainer(model=model,
+        #                   args=training_args,
+        #                   train_dataset=train_dataset,
+        #                   eval_dataset=eval_dataset,
+        #                   data_collator=collate_fn)
+        # trainer.train()
+        # print()
+        # print()
+        # print("YAY!")
+        # print()
+        # print()
+
+        model.train()
+
+        optimizer = AdamW(model.parameters(), lr=5e-5)
+        scheduler = get_scheduler(
+            name="linear",
             optimizer=optimizer,
-            num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
-            num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
+            num_warmup_steps=0,
+            num_training_steps=self.args.max_train_steps
         )
-        print("   - LearningRate Scheduler is ready")
 
-        print("Done!\n\nTraining Begins")
-
-        prompt = f"A photo of {folder}"
-        for epoch in range(args.num_train_epochs):
-            self.unet.train()
-            progress_bar = tqdm(total=len(dataloader))
-            progress_bar.set_description(f"Epoch {epoch}")
-            print("yay")
-            for step, batch in enumerate(dataloader):
-                print("yay again")
-
-                latents = self.vae.encode(batch["frames"]).latent_dist.sample()
-                latents = latents * self.vae.config.scaling_factor
-                bs = latents.shape[0]
-
-                noise = torch.randn_like(latents)
-                if args.noise_offset:
-                    # https://www.crosslabs.org//blog/diffusion-with-offset-noise
-                    noise += args.noise_offset * torch.randn(
-                        (latents.shape[0], latents.shape[1], 1, 1), device=latents.device
-                    )
-
-                timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps,
-                                          (bs,), dtype=torch.int64)
-                noise = noise.to("cuda")
-                timesteps = timesteps.to("cuda")
-
-                noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-
-
-                # time ids
-                def compute_time_ids(original_size, crops_coords_top_left):
-                    # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
-                    target_size = (args.resolution, args.resolution)
-
-                    add_time_ids = list(original_size + crops_coords_top_left + target_size)
-                    add_time_ids = torch.tensor([add_time_ids])
-                    add_time_ids = add_time_ids.to("cuda")
-                    return add_time_ids
-
-                add_time_ids = torch.cat(
-                    [compute_time_ids(s, c) for s, c in zip(batch["original_sizes"], batch["crop_top_lefts"])]
-                )
-
-                # Predict the noise residual
-                unet_added_conditions = {"time_ids": add_time_ids}
-                prompt_embeds, pooled_prompt_embeds = encode_prompt(
-                    text_encoders=[self.text_encoder_one, self.text_encoder_two],
-                    tokenizers=None,
-                    prompt=None,
-                    text_input_ids_list=[batch["input_ids_one"], batch["input_ids_two"]],
-                )
-                unet_added_conditions.update({"text_embeds": pooled_prompt_embeds})
-
-                noise_pred = self.unet(noisy_latents, timesteps, prompt_embeds, added_cond_kwargs=unet_added_conditions, return_dict=False)[0]
-
-                loss = F.mse_loss(noise_pred, noise)
+        for epoch in range(self.args.num_train_epochs):
+            for step, batch in enumerate(train_dataloader):
+                outputs = model(**batch)
+                loss = outputs.loss
                 loss.backward()
+
                 optimizer.step()
-                lr_scheduler.step()
+                scheduler.step()
                 optimizer.zero_grad()
 
-                progress_bar.update(1)
-            if args.to_save:
-                if (epoch + 1) % self.config.save_models_epochs == 0 or epoch == args.num_training_epochs - 1:
-                    pipeline = StableDiffusionXLPipeline(unet=self.unet, scheduler=self.noise_scheduler)
-                    pipeline.save_pretrained(self.config.ckpt_path + folder)
+                if step % self.args.logging_steps == 0:
+                    print(f"Epoch {epoch}, Step {step}, Loss: {loss.item()}")
 
-        print(f"Training LoRA on {folder} is finished")
-
-    def train_from_tensors(self, tensors, folder):
-        dataloader = self.__prepare_dataloader(tensors)
-        return self.__train(dataloader, folder)
-
-    def train_from_path(self, path, folder):
-        dataloader = self.__prepare_dataloader(path, "images")
-        return self.__train(dataloader, folder)
+                if step % self.args.checkpointing_steps == 0:
+                    model.save_pretrained(f"./model_checkpoint_{step}")

@@ -26,12 +26,13 @@ pwc_path = None
 
 checkpoint = 'checkpoints/anime_interp_full.ckpt'
 diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
-# diff_path = 'runwayml/stable-diffusion-v1-5'
+# diff_path = 'checkpoints/diffusers/runwayml/stable-diffusion-v1-5'
+# diff_path = 'CompVis/stable-diffusion-v1-4'
 
-diff_objective = 'latents'
+diff_objective = 'lora'
 # diff_objective = None
 
-store_path = 'outputs/test_aot_DiffimeInterp_latents/'
+store_path = 'outputs/test_aot_DiffimeInterp_lora/23-06/'
 
 
 
