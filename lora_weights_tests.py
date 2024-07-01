@@ -5,18 +5,20 @@ from PIL import Image
 diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 # diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
-lora_path = "checkpoints/outputs/LoRAs/07-02/test1/sdxl"
+lora_path = "checkpoints/outputs/LoRAs/07-05/test4"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-02/sdxl/test1"
+output_path = "outputs/weights_tests/07-05/sdxl/test4"
 
-prompt1 = "high quality, denip style"
+ns = 50  # Num inference steps
+
+prompt1 = "denip style, best quality, high quality"
 f_name1 = prompt1.replace(" ", "_") + ".png"
 
 prompt4 = "A group of characters laughing together in a cafe"
 f_name4 = prompt4.replace(" ", "_") + ".png"
 
-prompt5 = "A group of characters laughing together in a cafe, in the style of AniInt"
+prompt5 = "denip style, high quality,  A group of characters laughing together in a cafe"
 f_name5 = prompt5.replace(" ", "_") + ".png"
 #
 prompts2 = {
@@ -28,15 +30,15 @@ prompts2 = {
 
 
 prompts3 = {
-    "Japan_AoT_S4E4_shot2": "A group of man standing in the city, and a girl looks at them angerly, denip style, high quality",
-    "Japan_AoT_S4E16_shot2": "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality",
-    "Japan_AoT_S4E16_shot1": "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality",
-    "Japan_AoT_S4E4_shot1": "A group of people in the dessert, camera looks from above, denip style, high quality"
+    "Japan_AoT_S4E4_shot2": "high quality, denip style, A group of man standing in the city, and a girl looks at them angerly",
+    "Japan_AoT_S4E16_shot2": "high quality, denip style, A girl sitting in a dark room, with wooden berrals behind her",
+    "Japan_AoT_S4E16_shot1": "high quality, denip style, A girl sitting in a dark room, with wooden berrals behind her",
+    "Japan_AoT_S4E4_shot1": "high quality, denip style, A group of people in the dessert, camera looks from above"
 }
 
 s1_prompt2 = "A girl sitting in a dark room, with wooden berrals behind her"
 s1_f_name2 = s1_prompt2.replace(" ", "_") + ".png"
-s1_prompt3 = "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality"
+s1_prompt3 = "high quality, denip style, A girl sitting in a dark room, with wooden berrals behind her"
 s1_f_name3 = s1_prompt3.replace(" ", "_") + ".png"
 
 s2_prompt2 = "A group of man standing in the city, and a girl looks at them angerly"
@@ -51,10 +53,13 @@ s3_f_name3 = s3_prompt3.replace(" ", "_") + ".png"
 
 # animeinterp_output_path = "outputs/avi_full_results/Disney_v4_21_044474_s1/frame2.png"
 
+def get_image_path(scene):
+    return f"outputs/test_aot_DiffimeInterp_latents/{scene}/frame2.png"
+
 
 if __name__ == '__main__':
-    # pipeline = AutoPipelineForText2Image.from_pretrained(diff_path).to("cuda")
     pipeline = AutoPipelineForText2Image.from_pretrained(diff_path).to("cuda")
+    # pipeline = AutoPipelineForText2Image.from_pretrained(diff_path).to("cuda")
     if not os.path.exists(output_path):
         os.makedirs(output_path)
     # root_name = "Disney_v4_21_044474_s1"
@@ -65,8 +70,10 @@ if __name__ == '__main__':
     # for i in range(0, 1):
         print(f"Processing {root_name}")
         root_path = os.path.join(lora_path, root_name)
-
-        for folder_name in os.listdir(root_path):
+        image = Image.open(get_image_path(root_name))
+        folder_list = os.listdir(root_path)
+        folder_list.sort(reverse=True)
+        for idx, folder_name in enumerate(folder_list):
             folder_path = os.path.join(root_path, folder_name)
             if os.path.isfile(folder_path):
                 continue
@@ -90,6 +97,7 @@ if __name__ == '__main__':
                 print(f"No LoRA weights found in {folder_name}")
 
 
+
             # Here you can add any processing or generation steps using the loaded weights
             # For example:
             # result = pipeline("prompt", num_inference_steps=30, guidance_scale=7.5)
@@ -99,14 +107,19 @@ if __name__ == '__main__':
             output_folder = os.path.join(output_root_folder, folder_name)
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder)
-            # img1 = pipeline(prompt1, image=image, num_inference_steps=50, negative_prompt="photorealistic. disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img1 = pipeline(prompt1, num_inference_steps=50, negative_prompt="photorealistic. disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            
+            image.save(os.path.join(output_folder, "seed_image.png"))
+            
+            img1 = pipeline(prompt1, image=image, num_inference_steps=ns, negative_prompt="photorealistic. disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            # img1 = pipeline(prompt1, num_inference_steps=50, negative_prompt="photorealistic. disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
             img1.save(os.path.join(output_folder, f_name1))
 
-            img2 = pipeline(prompts2[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
+            img2 = pipeline(prompts2[root_name], image=image, num_inference_steps=ns, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
+            # img2 = pipeline(prompts2[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
             img2.save(os.path.join(output_folder, (prompts2[root_name].replace(" ", "_") + ".png")))
 
-            img3 = pipeline(prompts3[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealisric. 3D").images[0]
+            img3 = pipeline(prompts3[root_name], image=image, num_inference_steps=ns, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealisric. 3D").images[0]
+            # img3 = pipeline(prompts3[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealisric. 3D").images[0]
             img3.save(os.path.join(output_folder, (prompts3[root_name].replace(" ", "_") + ".png")))
 
             # img2 = pipeline(s3_prompt2, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
@@ -117,15 +130,15 @@ if __name__ == '__main__':
             # img3.save(os.path.join(output_folder, s3_f_name3))
 
             # img4 = pipeline(prompt4, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img4 = pipeline(prompt4, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img4.save(os.path.join(output_folder, f_name4))
+            # # img4 = pipeline(prompt4, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            # img4.save(os.path.join(output_folder, f_name4))
 
-            # img5 = pipeline(prompt5, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img5 = pipeline(prompt5, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            img5 = pipeline(prompt5, image=image, num_inference_steps=ns, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            # img5 = pipeline(prompt5, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
             img5.save(os.path.join(output_folder, f_name5))
 
-            # img6 = pipeline("", image=image, num_inference_steps=50, negative_prompt="disfigure. blurry. poorly drawn face. poor facial details").images[0]
-            img6 = pipeline("", num_inference_steps=50, negative_prompt="disfigure. blurry. poorly drawn face. poor facial details").images[0]
+            img6 = pipeline("", image=image, num_inference_steps=ns, negative_prompt="disfigure. blurry. poorly drawn face. poor facial details").images[0]
+            # img6 = pipeline("", num_inference_steps=50, negative_prompt="disfigure. blurry. poorly drawn face. poor facial details").images[0]
             img6.save(os.path.join(output_folder, "no_prompt.png"))
 
 

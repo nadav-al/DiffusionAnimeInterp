@@ -1010,8 +1010,6 @@ def main(input_args):
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(unet):
-                print("We did it!!! we're training!!!")
-                print(batch["pixel_values"].shape)
                 # Convert images to latent space
                 if args.pretrained_vae_model_name_or_path is not None:
                     pixel_values = batch["pixel_values"].to(dtype=weight_dtype)
