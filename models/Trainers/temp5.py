@@ -25,7 +25,11 @@ def parse_args():
         default="checkpoints/outputs/LoRAs",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
-
+    parser.add_argument(
+        "--train_bs",
+        type=int,
+        default=4
+    )
     args = parser.parse_args()
 
     if args.data_path is None:
@@ -66,20 +70,20 @@ if __name__ == "__main__":
         print("output_path: ", output_path)
 
 
-        # os.system(
-        #     f"accelerate launch --multi_gpu models/Trainers/{script_name}.py \
-        #       --pretrained_model_name_or_path={diff_path} \
-        #       --train_data_dir={dir} \
-        #       --dataloader_num_workers=8 \
-        #       --resolution=512 \
-        #       --random_flip \
-        #       --train_batch_size=2 \
-        #       --train_text_encoder \
-        #       --max_train_steps=1000 \
-        #       --learning_rate=1e-04 \
-        #       --lr_scheduler='cosine' \
-        #       --lr_warmup_steps=100 \
-        #       --output_dir={output_path} \
-        #       --checkpointing_steps=100 \
-        #       --seed=100398 \
-        #       --scale_lr")
+        os.system(
+            f"accelerate launch models/Trainers/{script_name}.py \
+              --pretrained_model_name_or_path={diff_path} \
+              --train_data_dir={dir} \
+              --dataloader_num_workers=8 \
+              --resolution=512 \
+              --random_flip \
+              --train_batch_size={args.train_bs} \
+              --train_text_encoder \
+              --max_train_steps=1000 \
+              --learning_rate=1e-04 \
+              --lr_scheduler='cosine' \
+              --lr_warmup_steps=100 \
+              --output_dir={output_path} \
+              --checkpointing_steps=100 \
+              --seed=100398 \
+              --scale_lr")

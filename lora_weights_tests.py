@@ -2,15 +2,15 @@ from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 import os
 from PIL import Image
 
-# diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
-diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
+diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
+# diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
-lora_path = "checkpoints/outputs/LoRAs/06-25/test1/sdxl"
+lora_path = "checkpoints/outputs/LoRAs/07-02/test1/sdxl"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-01/animagine/test2"
+output_path = "outputs/weights_tests/07-02/sdxl/test1"
 
-prompt1 = "a photo in the style of AniInt"
+prompt1 = "high quality, denip style"
 f_name1 = prompt1.replace(" ", "_") + ".png"
 
 prompt4 = "A group of characters laughing together in a cafe"
@@ -19,32 +19,34 @@ f_name4 = prompt4.replace(" ", "_") + ".png"
 prompt5 = "A group of characters laughing together in a cafe, in the style of AniInt"
 f_name5 = prompt5.replace(" ", "_") + ".png"
 #
-# prompts2 = {
-#     "Japan_AoT_S4E4_shot2": "A group of man standing in the city, and a girl looks at them angerly.",
-#     "Japan_AoT_S4E16_shot2": "A girl looking scared sitting in a dark room, with wooden berrals behind her.",
-#     "Japan_AoT_S4E4_shot1": "A group of people in the dessert, camera looks from above."
-# }
-#
-#
-# prompts3 = {
-#     "Japan_AoT_S4E4_shot2": "A group of man standing in the city, and a girl looks at them angerly, in the style of AniInt",
-#     "Japan_AoT_S4E16_shot2": "A girl looking scared sitting in a dark room, with wooden berrals behind her, in the style of AniInt",
-#     "Japan_AoT_S4E4_shot1": "A group of people in the dessert, camera looks from above, in the style of AniInt"
-# }
+prompts2 = {
+    "Japan_AoT_S4E4_shot2": "A group of man standing in the city, and a girl looks at them angerly.",
+    "Japan_AoT_S4E16_shot2": "A girl looking scared sitting in a dark room, with wooden berrals behind her.",
+    "Japan_AoT_S4E16_shot1": "A girl looking scared sitting in a dark room, with wooden berrals behind her.",
+    "Japan_AoT_S4E4_shot1": "A group of people in the dessert, camera looks from above."
+}
+
+
+prompts3 = {
+    "Japan_AoT_S4E4_shot2": "A group of man standing in the city, and a girl looks at them angerly, denip style, high quality",
+    "Japan_AoT_S4E16_shot2": "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality",
+    "Japan_AoT_S4E16_shot1": "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality",
+    "Japan_AoT_S4E4_shot1": "A group of people in the dessert, camera looks from above, denip style, high quality"
+}
 
 s1_prompt2 = "A girl sitting in a dark room, with wooden berrals behind her"
 s1_f_name2 = s1_prompt2.replace(" ", "_") + ".png"
-s1_prompt3 = "A girl sitting in a dark room, with wooden berrals behind her, in the style of AniInt"
+s1_prompt3 = "A girl sitting in a dark room, with wooden berrals behind her, denip style, high quality"
 s1_f_name3 = s1_prompt3.replace(" ", "_") + ".png"
 
 s2_prompt2 = "A group of man standing in the city, and a girl looks at them angerly"
 s2_f_name2 = s2_prompt2.replace(" ", "_") + ".png"
-s2_prompt3 = "A group of man standing in the city, and a girl looks at them angerly, in the style of AniInt"
+s2_prompt3 = "A group of man standing in the city, and a girl looks at them angerly, denip style, high quality"
 s2_f_name3 = s2_prompt3.replace(" ", "_") + ".png"
 
-s3_prompt2 = "A man wearing a red hat looking surprised in a boat"
+s3_prompt2 = "two exhausted children stand in the dessert and two more characters look at them"
 s3_f_name2 = s3_prompt2.replace(" ", "_") + ".png"
-s3_prompt3 = "A man wearing a red hat looking surprised in a boat, in the style of AniInt"
+s3_prompt3 = s3_prompt2 + ", denip style, high quality"
 s3_f_name3 = s3_prompt3.replace(" ", "_") + ".png"
 
 # animeinterp_output_path = "outputs/avi_full_results/Disney_v4_21_044474_s1/frame2.png"
@@ -58,7 +60,7 @@ if __name__ == '__main__':
     # root_name = "Disney_v4_21_044474_s1"
     # root_path = os.path.join(lora_path, root_name)
     # image = Image.open(animeinterp_output_path)
-    image = Image.open("temp_img.png")
+    # image = Image.open("temp_img.png")
     for root_name in os.listdir(lora_path):
     # for i in range(0, 1):
         print(f"Processing {root_name}")
@@ -101,18 +103,18 @@ if __name__ == '__main__':
             img1 = pipeline(prompt1, num_inference_steps=50, negative_prompt="photorealistic. disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
             img1.save(os.path.join(output_folder, f_name1))
 
-            # img2 = pipeline(prompts2[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            # img2.save(os.path.join(output_folder, (prompts2[root_name].replace(" ", "_") + ".png")))
+            img2 = pipeline(prompts2[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
+            img2.save(os.path.join(output_folder, (prompts2[root_name].replace(" ", "_") + ".png")))
 
-            # img3 = pipeline(prompts3[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            # img3.save(os.path.join(output_folder, (prompts3[root_name].replace(" ", "_") + ".png")))
+            img3 = pipeline(prompts3[root_name], negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealisric. 3D").images[0]
+            img3.save(os.path.join(output_folder, (prompts3[root_name].replace(" ", "_") + ".png")))
 
             # img2 = pipeline(s3_prompt2, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img2 = pipeline(s3_prompt2, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img2.save(os.path.join(output_folder, s3_f_name2))
+            # img2 = pipeline(s3_prompt2, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            # img2.save(os.path.join(output_folder, s3_f_name2))
             # img3 = pipeline(s3_prompt3, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img3 = pipeline(s3_prompt3, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
-            img3.save(os.path.join(output_folder, s3_f_name3))
+            # img3 = pipeline(s3_prompt3, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
+            # img3.save(os.path.join(output_folder, s3_f_name3))
 
             # img4 = pipeline(prompt4, image=image, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
             img4 = pipeline(prompt4, num_inference_steps=50, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details").images[0]
