@@ -11,6 +11,8 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
+from utils.lora_utils import generate_caption
+
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
 from diffusers import StableDiffusionImg2ImgPipeline
 
@@ -71,7 +73,7 @@ class DiffimeInterp(nn.Module):
 
         normalize1 = TF.Normalize(config.mean, [1.0, 1.0, 1.0])
         normalize2 = TF.Normalize([0, 0, 0], config.std)
-        self.trans = TF.Compose([TF.ToTensor(), normalize1, normalize2, ])
+        self.trans = TF.Compose([TF.ToTensor(), normalize1, normalize2,])
 
         revmean = [-x for x in config.mean]
         revstd = [1.0 / x for x in config.std]
@@ -79,6 +81,7 @@ class DiffimeInterp(nn.Module):
         revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
         self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
         self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
+        self.to_img = TF.ToPILImage()
 
         self.config = config
         if init_diff:
@@ -187,15 +190,16 @@ class DiffimeInterp(nn.Module):
         feat_t[1][norm_t[1] > 0] = feat_t[1].clone()[norm_t[1] > 0] / norm_t[1][norm_t[1] > 0]
         feat_t[2][norm_t[2] > 0] = feat_t[2].clone()[norm_t[2] > 0] / norm_t[2][norm_t[2] > 0]
 
-    def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder):
+    def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
         I1t_im = self.revtrans(I1t.cpu()[0])
         I2t_im = self.revtrans(I2t.cpu()[0])
-        I1t_im = I1t_im.resize((1024,1024))
-        I2t_im = I2t_im.resize((1024,1024))
-        dI1t = self.pipeline("2D cartoon. Hand drawn animation. Frame by Frame. Disney. Anime",
+        I1t_im = I1t_im.resize((512, 512))
+        I2t_im = I2t_im.resize((512, 512))
+        caption1 = generate_caption(I1t_im, max_words=2, style=style)
+        dI1t = self.pipeline(caption1,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
                              num_inferece_steps=30, image=I1t_im).images[0]
-        dI2t = self.pipeline("2D cartoon. Hand drawn animation. Frame by Frame. Disney. Anime",
+        dI2t = self.pipeline(caption1,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
                              num_inferece_steps=30, image=I2t_im).images[0]
 
@@ -240,10 +244,14 @@ class DiffimeInterp(nn.Module):
         self.normalize(I1t, feat1t, norm1, norm1t)
         self.normalize(I2t, feat2t, norm2, norm2t)
 
+        if folder[0][0].startswith("Disney"):
+            style = "Disney"
+        else:
+            style = "Anime"
 
         # diffusion
         if self.config.diff_objective == "latents":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder)
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
 
         elif self.config.diff_objective == "result":
             # synthesis
@@ -251,17 +259,19 @@ class DiffimeInterp(nn.Module):
                                   torch.cat([feat1t[1], feat2t[1]], dim=1),
                                   torch.cat([feat1t[2], feat2t[2]], dim=1))
             It_warp = self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)
-            It_warp = self.pipeline("2D cartoon. Hand-Drawn animation. Frame by Frame. Disney. Anime",
+            caption = generate_caption(It_warp, max_words=2, style=style)
+            It_warp = self.pipeline(caption,
                                     negative_prompt="Blur. Bad Quality. Distorted. smudges.",
                                     num_inferece_steps=60, image=It_warp).images[0]
             It_warp = It_warp.resize(self.config.test_size)
             It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 
         elif self.config.diff_objective == "both":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder)
-            It_warp = self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)
-            It_warp = It_warp.resize((1024,1024))
-            It_warp = self.pipeline("2D cartoon. Hand-Drawn animation. Frame by Frame. Disney. Anime",
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
+            It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+            It_warp = It_warp.resize((512,512))
+            caption = generate_caption(It_warp, max_words=2, style=style)
+            It_warp = self.pipeline(caption,
                                     negative_prompt="Blur. Bad Quality. Distorted. smudges.",
                                     num_inferece_steps=60, image=It_warp).images[0]
             It_warp = It_warp.resize(self.config.test_size)

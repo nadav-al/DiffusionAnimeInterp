@@ -4,18 +4,18 @@ from datetime import datetime
 
 import cv2
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForCausalLM, PaliGemmaForConditionalGeneration
+from transformers import BlipProcessor, BlipForConditionalGeneration
 import numpy as np
+import torch
 import json
 
 
-# custom_cache_dir = "/cs/labs/danix/nadav_al/AnimeInterp/checkpoints/Blip"
-# os.environ['HF_HOME'] = custom_cache_dir
+custom_cache_dir = "/cs/labs/danix/nadav_al/AnimeInterp/checkpoints/Blip"
+os.environ['HF_HOME'] = custom_cache_dir
 #
-# # Set up the BLIP image captioning model
-# processor = AutoProcessor.from_pretrained("microsoft/Florence-2-base", cache_dir=custom_cache_dir, trust_remote_code=True)
-# model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", cache_dir=custom_cache_dir, trust_remote_code=True)
-# model = PaliGemmaForConditionalGeneration.from_pretrained("microsoft/Florence-2-large", cache_dir=custom_cache_dir, trust_remote_code=True)
+# Set up the BLIP image captioning model
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base", cache_dir=custom_cache_dir)
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base", cache_dir=custom_cache_dir, torch_dtype=torch.float16).to("cuda")
 
 def get_next_test_number(root_path, current_date):
     test_dir = os.path.join(root_path, current_date)
@@ -175,9 +175,9 @@ def filter_crops(crops, img_mean, threshold):
         else:
             d_crops.append(crop)
             dec.append(std)
-    print(f"image mean value = {img_mean}, with threshold = 1/{img_mean/threshold}")
-    print(f"accepted crops' mean value = {np.median(acc)}")
-    print(f"declined crops' mean value = {np.median(dec)}")
+    # print(f"image mean value = {img_mean}, with threshold = 1/{img_mean/threshold}")
+    # print(f"accepted crops' mean value = {np.median(acc)}")
+    # print(f"declined crops' mean value = {np.median(dec)}")
     return f_crops, d_crops
 
 def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, max_ratio=1.3, overlap=0.3, num_crops=10, methods=None, unique_folder=False, save_folder=True):
@@ -188,8 +188,8 @@ def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, m
         methods = [Methods.JITTER_RANDOM]
     image_files = os.listdir(images_folder)
     image_files.sort()
-    sizes = [0.4, 0.55, 0.6, 0.65, 0.72, 0.78, 0.85, 0.9, 0.95]
-    repeats = [1, 2, 3, 2, 1, 2, 4, 4, 3]
+    sizes = [0.4, 0.55, 0.6, 0.65, 0.72, 0.78, 0.85, 0.9, 0.95, 1]
+    repeats = [2, 2, 2, 3, 2, 3, 2, 2, 1, 1]
     for idx, image_name in enumerate(image_files):
         if idx >= 3 or idx == 1 or not image_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
             continue
@@ -198,15 +198,18 @@ def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, m
             # g_size = (int(img.height * 0.8), int(img.height * 0.7))
             img_mean = calculate_color_std(img)
             total_crops = []
-            for threshold in range(7, 3, -1):
-                if len(total_crops) >= 40:
-                    break
+            for threshold in range(7, 4, -1):
                 crops = []
                 for j in range(len(sizes)):
                     g_size = int(img.height*sizes[j])
                     for i in range(repeats[j]):
-                        left = random.randint(0, img.width - g_size)
-                        top = random.randint(0, img.height - g_size)
+                        l1 = random.randint(0, img.width - g_size)
+                        l2 = random.randint(0, img.width - g_size)
+                        left = (0 + l1 + l2) // 3
+                        t1 = random.randint(0, img.height - g_size)
+                        t2 = random.randint(0, img.height - g_size)
+                        t3 = random.randint(0, img.height - g_size)
+                        top = (t1 + t2 + t3) // 3
                         cropped = img.crop((left, top, left+g_size, top+g_size))
                         # resized = cropped.resize((target_size, target_size))
                         # crops.append(resized)
@@ -229,10 +232,11 @@ def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, m
                 #     else:
                 #         raise ValueError(f"Unknown method: {method}")
 
-                f_crops, d_crops = filter_crops(crops, img_mean, img_mean/threshold)
-                print(len(f_crops), " crops remains out of ", len(crops))
-                total_crops += f_crops
-                print("total crops for this frame: ", len(total_crops))
+                # f_crops, d_crops = filter_crops(crops, img_mean, img_mean/threshold)
+                # print(len(f_crops), " crops remains out of ", len(crops))
+                # total_crops += random.sample(crops, min(len(crops), num_crops))
+                total_crops += crops
+                # print("total crops for this frame: ", len(total_crops))
             # final_mean = np.mean([calculate_color_std(c) for c in total_crops])
             # final_std = np.std([calculate_color_std(c) for c in total_crops])
             # print("final mean = ", final_mean)
@@ -245,7 +249,8 @@ def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, m
                                            f"{os.path.splitext(image_name)[0]}_crop{i + 1}.png")
 
                 crop.save(output_path)
-            img.save(os.path.join(output_folder, f"{os.path.splitext(image_name)[0]}.png"))
+            img.save(os.path.join(output_folder, f"{os.path.splitext(image_name)[0]}_1.png"))
+            img.save(os.path.join(output_folder, f"{os.path.splitext(image_name)[0]}_2.png"))
     return output_folder
 
 
@@ -273,15 +278,19 @@ KEYWORDS = {
     'Hand-Drawn',
     '2D',
 }
-def generate_caption(min_words=1, max_words=len(KEYWORDS), style="Disney"):
-    num_words = random.randint(min_words, min(max_words, len(KEYWORDS)))
-    selected_keywords = random.sample(KEYWORDS, num_words)
-    selected_keywords.append(style)
-    random.shuffle(selected_keywords)
+
+def generate_caption(image, min_words=1, max_words=len(KEYWORDS), style="Disney"):
+    num_words = random.randint(min_words, min(max_words+1, len(KEYWORDS)))
+    selected_keywords_lst = random.sample(KEYWORDS, num_words)
+    random.shuffle(selected_keywords_lst)
 
     # Concatenate the keywords with a space in between
-    caption = ", ".join(selected_keywords)
-    return f"{UNIQUE_TOKEN} style, high quality, " + caption
+    selected_keywords = ", ".join(selected_keywords_lst)
+
+    inputs = processor(image, return_tensors="pt").to("cuda", torch.float16)
+    out = model.generate(**inputs)
+    caption = processor.decode(out[0], skip_special_tokens=True)
+    return f"{caption}. high quality. {UNIQUE_TOKEN}-{style}-style, {selected_keywords}"
 
 
 
@@ -298,7 +307,9 @@ def generate_metadata(directory):
                 continue
             image_path = os.path.join(directory, filename)
             try:
-                caption = generate_caption(min_words=1, max_words=3, style=style)
+                image = Image.open(image_path)
+                caption = generate_caption(image, min_words=2, max_words=4, style=style)
+                print(filename, ": ", caption)
                 json_line = json.dumps({
                     "file_name": filename,
                     "text": caption

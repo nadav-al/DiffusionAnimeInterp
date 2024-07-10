@@ -2,15 +2,15 @@ from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 import os
 from PIL import Image
 
-diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
-# diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
+# diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
+diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
 lora_path = "checkpoints/outputs/LoRAs/07-05/test4"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-05/sdxl/test4"
+output_path = "outputs/weights_tests/07-08/animegine/test2"
 
-ns = 50  # Num inference steps
+ns = 20  # Num inference steps
 
 prompt1 = "denip style, best quality, high quality"
 f_name1 = prompt1.replace(" ", "_") + ".png"

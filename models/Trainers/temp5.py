@@ -6,8 +6,10 @@ from utils import generate_metadata, preprocess, generate_folder, Methods
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--use_xl",
-        action="store_true",
+        "--base_model",
+        type=str,
+        default="sdxl",
+        help='The base model to use. Choose between ["sdxl", "sd15", "animagine"]',
     )
     parser.add_argument(
         "--data_path",

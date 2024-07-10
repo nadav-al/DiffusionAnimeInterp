@@ -116,6 +116,12 @@ def validate(config, args):
                 t = 1.0 / (x + 1) * (tt + 1)
                 if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
                     outputs = model(I1, I2, F12i, F21i, t)
+                elif config.model == 'LoraInterp':
+                    try:
+                        outputs = model(I1, I2, F12i, F21i, t, folder, weights_path="checkpoints/outputs/LoRAs/07-09/test13")
+                    except:
+                        print(f"folder {folder[0][0]}")
+                        print(type(I1), type(I2), type(F12i), type(F21i), type(folder))
                 else:
                     outputs = model(I1, I2, F12i, F21i, t, folder)
 
@@ -142,6 +148,6 @@ if __name__ == "__main__":
     lora_config=None
 
     if not os.path.exists(config.store_path):
-        os.mkdir(config.store_path)
+        os.makedirs(config.store_path)
 
     validate(config, args)

@@ -245,6 +245,24 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
+        "--width",
+        type=int,
+        default=1365,
+        help=(
+            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
+            " resolution"
+        ),
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=768,
+        help=(
+            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
+            " resolution"
+        ),
+    )
+    parser.add_argument(
         "--center_crop",
         default=False,
         action="store_true",
@@ -873,6 +891,7 @@ def main(input_args):
                 image = train_crop(image)
             else:
                 y1, x1, h, w = train_crop.get_params(image, (args.resolution, args.resolution))
+                # y1, x1, h, w = train_crop.get_params(image, args.resolution)
                 image = crop(image, y1, x1, h, w)
             crop_top_left = (y1, x1)
             crop_top_lefts.append(crop_top_left)
@@ -1044,6 +1063,7 @@ def main(input_args):
                 def compute_time_ids(original_size, crops_coords_top_left):
                     # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
                     target_size = (args.resolution, args.resolution)
+                    # target_size = args.resolution
                     add_time_ids = list(original_size + crops_coords_top_left + target_size)
                     add_time_ids = torch.tensor([add_time_ids])
                     add_time_ids = add_time_ids.to(accelerator.device, dtype=weight_dtype)
@@ -1144,7 +1164,7 @@ def main(input_args):
 
                         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
+                        # logger.info(f"Saved state to {save_path}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)

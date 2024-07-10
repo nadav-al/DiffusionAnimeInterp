@@ -29,10 +29,10 @@ diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
 # diff_path = 'checkpoints/diffusers/runwayml/stable-diffusion-v1-5'
 # diff_path = 'CompVis/stable-diffusion-v1-4'
 
-diff_objective = 'lora'
+diff_objective = 'both'
 # diff_objective = None
 
-store_path = 'outputs/test_aot_DiffimeInterp_lora/23-06/'
+store_path = 'outputs/test_aot_DiffimeInterp_lora/07-09/test1'
 
 
 
