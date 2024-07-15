@@ -32,7 +32,7 @@ diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
 diff_objective = 'both'
 # diff_objective = None
 
-store_path = 'outputs/test_aot_DiffimeInterp_lora/07-09/test1'
+store_path = 'outputs/test_aot_DiffimeInterp_lora/'
 
 
 

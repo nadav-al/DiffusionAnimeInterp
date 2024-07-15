@@ -10,6 +10,7 @@ import sys
 import cv2
 from utils.vis_flow import flow_to_color
 from utils.config import Config
+from utils.lora_utils import generate_folder
 
 import numpy as np
 from diffusers import StableDiffusionXLImg2ImgPipeline
@@ -69,7 +70,7 @@ def validate(config, args):
     model.load_state_dict(dict1['model_state_dict'], strict=False)
 
     # prepare others
-    store_path = config.store_path
+
 
     folders = []
 
@@ -87,7 +88,7 @@ def validate(config, args):
             print('Testing {}/{}-th group...'.format(validationIndex+1, len(testset)))
             sys.stdout.flush()
             sample, flow, index, folder = validationData
-
+            store_path = generate_folder(root_path=config.store_path, unique_folder=True)
             first_frame = sample[0]
             last_frame = sample[-1]
 
@@ -104,12 +105,14 @@ def validate(config, args):
 
             num_of_frames = config.inter_frames
 
-            if not os.path.exists(config.store_path + '/' + folder[0][0]):
-                os.mkdir(config.store_path + '/' + folder[0][0])
+            # if not os.path.exists(config.store_path + '/' + folder[0][0]):
+            #     os.makedirs(config.store_path + '/' + folder[0][0])
+            store_path = generate_folder(folder[0][0], config.store_path, unique_folder=(validationIndex == 0))
 
             # save the first and last frame
-            revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
-            revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
+            print(store_path, os.path.exists(store_path))
+            # revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
+            # revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
 
             x = num_of_frames
             for tt in range(num_of_frames):
@@ -117,15 +120,14 @@ def validate(config, args):
                 if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
                     outputs = model(I1, I2, F12i, F21i, t)
                 elif config.model == 'LoraInterp':
-                    try:
-                        outputs = model(I1, I2, F12i, F21i, t, folder, weights_path="checkpoints/outputs/LoRAs/07-09/test13")
-                    except:
-                        print(f"folder {folder[0][0]}")
-                        print(type(I1), type(I2), type(F12i), type(F21i), type(folder))
+                    outputs = model(I1, I2, F12i, F21i, t, folder=folder)
                 else:
-                    outputs = model(I1, I2, F12i, F21i, t, folder)
+                    outputs = model(I1, I2, F12i, F21i, t, folder=folder)
 
-                It_warp = outputs[0]
+                if outputs is None:
+                    continue
+
+                It_warp =   outputs[0]
 
                 warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
                 # warp_img = refiner_pipe(image=warp_img).images[0]

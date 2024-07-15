@@ -92,7 +92,6 @@ class LoRATrainer:
                       --rank=6 \
                       --mixed_precision='fp16' \
                       --dataloader_num_workers=8 \
-                      --resolution=512 \
                       --train_batch_size={self.args.train_bs} \
                       {self.train_text_enc} \
                       --learning_rate=1e-04 \
@@ -100,7 +99,7 @@ class LoRATrainer:
                       --snr_gamma=5 \
                       --lr_warmup_steps=0 \
                       --output_dir={output_path} \
-                      --num_train_epochs=100 \
+                      --num_train_epochs=10 \
                       --checkpointing_steps=50 \
                       --resume_from_checkpoint='latest' \
                       --scale_lr")

@@ -11,6 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 from .DiffimeInterp import DiffimeInterp
+from utils.lora_utils import generate_caption
 
 from transformers import CLIPVisionModelWithProjection
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
@@ -65,36 +66,36 @@ def _process_single_image(image_tensor, canny_th_low=100, canny_th_high=200):
 
 class CannyDiffimeInterp(DiffimeInterp):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, canny_th_low=50, canny_th_high=150, args=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, canny_th_low=50, canny_th_high=200, args=None):
         super(CannyDiffimeInterp, self).__init__(path, config, False, args)
         self.cth_low = canny_th_low
         self.cth_heigh = canny_th_high
 
         print("loading controlnet")
-        controlnet = None
-        # controlnet = ControlNetModel.from_pretrained(
-        #     config.controlnet_id,
-        #     torch_dtype=torch.bfloat16,
-        #     use_safetensors=True,
-        # ).to("cuda")
-
+        # controlnet = None
+        controlnet = ControlNetModel.from_pretrained(
+            config.controlnet_id,
+            torch_dtype=torch.bfloat16,
+            use_safetensors=True,
+        ).to("cuda")
+        self.load_diffuser("text", controlnet)
         print("controlnet loaded")
 
-        image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-            "h94/IP-Adapter",
-            subfolder="models/image_encoder",
-            torch_dtype=torch.float16
-        )
-
-        self.pipeline = AutoPipelineForText2Image.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
-            image_encoder=image_encoder,
-            torch_dtype=torch.float16
-        ).to("cuda")
-
-        self.pipeline.load_ip_adapter(config.ip_adapter_id, subfolder="sdxl_models",
-                                      weight_name="ip-adapter-plus_sdxl_vit-h.safetensors")
-        self.pipeline.image_encoder.to("cuda")
+        # image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+        #     "h94/IP-Adapter",
+        #     subfolder="models/image_encoder",
+        #     torch_dtype=torch.float16
+        # )
+        #
+        # self.pipeline = AutoPipelineForText2Image.from_pretrained(
+        #     "stabilityai/stable-diffusion-xl-base-1.0",
+        #     image_encoder=image_encoder,
+        #     torch_dtype=torch.float16
+        # ).to("cuda")
+        #
+        # self.pipeline.load_ip_adapter(config.ip_adapter_id, subfolder="sdxl_models",
+        #                               weight_name="ip-adapter-plus_sdxl_vit-h.safetensors")
+        # self.pipeline.image_encoder.to("cuda")
         # self.load_diffuser(type="text", controlnet=controlnet)
 
 
@@ -142,14 +143,14 @@ class CannyDiffimeInterp(DiffimeInterp):
 
         print("canny created")
 
-
-        resizer = TF.Resize((512,512))
+        # self.pipeline.load_lora_weights("checkpoints/outputs/LoRAs/07-09/test13/Japan_AoT_S4E16_shot1", weight_name="pytorch_lora_weights.safetensors", adapter_name="lora")
+        # resizer = TF.Resize((512,512))
         # print(w_I2c_img)
         # I1_im = self.revNormalize(I1.cpu()[0]).unsqueeze(0).to("cuda")
         folder_path = self.config.testset_root + folder[0][0]
         images_path = os.listdir(folder_path)
-        im1 = Image.open(os.path.join(folder_path,images_path[0])).resize((512,512))
-        im2 = Image.open(os.path.join(folder_path,images_path[2])).resize((512,512))
+        im1 = Image.open(os.path.join(folder_path,images_path[0]))#.resize((512,512))
+        im2 = Image.open(os.path.join(folder_path,images_path[2]))#.resize((512,512))
         # I1_im = self.pipeline.prepare_ip_adapter_image_embeds(
         #     ip_adapter_image=im1,
         #     ip_adapter_image_embeds=None,
@@ -167,7 +168,7 @@ class CannyDiffimeInterp(DiffimeInterp):
         # )
         # diffuser
         try:
-            lora_path = os.path.join("checkpoints/outputs/LoRAs/06-24/test1/sdxl", folder[0][0], "checkpoint-500", "pytorch_lora_weights.safetensors")
+            lora_path = os.path.join("checkpoints/outputs/LoRAs/07-09/test13/", folder[0][0], "checkpoint-500", "pytorch_lora_weights.safetensors")
             self.pipeline.load_lora_weights(lora_path)
         except Exception as e:
             print(f"Error processing {folder[0][0]}: {str(e)}")
@@ -180,15 +181,16 @@ class CannyDiffimeInterp(DiffimeInterp):
         # d_I2c = self.pipeline("a girl sits on wooden stairs in a basement with barrels behind her. she looks sad and ashamed. Anime ", image=w_I2c_img, ip_adapter_image=im2).images[0].resize(self.config.test_size)
         # d_I1c = self.pipeline("best quality, high quality, in the style of AniInt", image=w_I1c_img, ip_adapter_image=im1).images[0].resize(self.config.test_size)
         # d_I2c = self.pipeline("best quality, high quality, in the style of AniInt", image=w_I2c_img, ip_adapter_image=im2).images[0].resize(self.config.test_size)
-        d_I1c = self.pipeline("best quality, high quality, in the style of AniInt", ip_adapter_image=im1).images[0].resize(self.config.test_size)
-        d_I2c = self.pipeline("best quality, high quality, in the style of AniInt", ip_adapter_image=im2).images[0].resize(self.config.test_size)
+        caption1 = generate_caption(im1, max_words=3, style="Anime")
+        d_I1c = self.pipeline(caption1, image=w_I1c_img).images[0].resize(self.config.test_size)
+        d_I2c = self.pipeline(caption1, image=w_I2c_img).images[0].resize(self.config.test_size)
         self.pipeline.unload_lora_weights()
         print("diffused")
 
         # for exploration and understanding the model, saves the intermediate results
         # self.revtrans(w_I1c.cpu()[0]).save(f'{self.store_path}/canny_I1_{self.counter}.png')
         # self.revtrans(w_I2c.cpu()[0]).save(f'{self.store_path}/canny_I2_{self.counter}.png')
-
+        print(store_latents_path)
         d_I1c.save(f'{store_latents_path}/lat_frame1.png')
         d_I2c.save(f'{store_latents_path}/lat_frame3.png')
 
@@ -203,6 +205,7 @@ class CannyDiffimeInterp(DiffimeInterp):
         It_warp = self.synnet(torch.cat([d_I1c, d_I2c], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                               torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
         #
-        # warp_im = TF.ToPILImage(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+        warp_im = TF.ToPILImage()(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+        warp_im.save(f"{store_latents_path}/frame2.png")
 
         return It_warp, F12, F21, F12in, F21in

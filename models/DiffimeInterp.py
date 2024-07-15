@@ -191,17 +191,21 @@ class DiffimeInterp(nn.Module):
         feat_t[2][norm_t[2] > 0] = feat_t[2].clone()[norm_t[2] > 0] / norm_t[2][norm_t[2] > 0]
 
     def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
-        I1t_im = self.revtrans(I1t.cpu()[0])
-        I2t_im = self.revtrans(I2t.cpu()[0])
-        I1t_im = I1t_im.resize((512, 512))
-        I2t_im = I2t_im.resize((512, 512))
+        # I1t_im = self.revtrans(I1t.cpu()[0])
+        I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
+        # I2t_im = self.revtrans(I2t.cpu()[0])
+        I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
+        # I1t_im = I1t_im.resize((512, 512))
+        # I2t_im = I2t_im.resize((512, 512))
         caption1 = generate_caption(I1t_im, max_words=2, style=style)
         dI1t = self.pipeline(caption1,
+                             width=I1t_im.width, height=I1t_im.height,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I1t_im).images[0]
+                             num_inferece_steps=30, image=I1t_im, strength=0.5).images[0]
         dI2t = self.pipeline(caption1,
+                             width=I2t_im.width, height=I2t_im.height,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I2t_im).images[0]
+                             num_inferece_steps=30, image=I2t_im, strength=0.5).images[0]
 
         # resize
         dI1t = dI1t.resize(self.config.test_size)
@@ -210,7 +214,7 @@ class DiffimeInterp(nn.Module):
 
         path = self.config.store_path + '/' + folder[0][0] + '/latents'
         if not os.path.exists(path):
-            os.mkdir(path)
+            os.makedirs(path)
         I1t_im.save(path + '/I1t.png')
         I2t_im.save(path + '/I2t.png')
         dI1t.save(path + '/dI1t.png')
@@ -227,6 +231,7 @@ class DiffimeInterp(nn.Module):
 
     def forward(self, I1, I2, F12i, F21i, t, folder=None):
         # extract features
+
         I1o, features1, I2o, features2 = self.extract_features_2_frames(I1, I2)
         feat11, feat12, feat13 = features1
         feat21, feat22, feat23 = features2
@@ -258,7 +263,7 @@ class DiffimeInterp(nn.Module):
             It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                                   torch.cat([feat1t[1], feat2t[1]], dim=1),
                                   torch.cat([feat1t[2], feat2t[2]], dim=1))
-            It_warp = self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)
+            It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
             caption = generate_caption(It_warp, max_words=2, style=style)
             It_warp = self.pipeline(caption,
                                     negative_prompt="Blur. Bad Quality. Distorted. smudges.",
@@ -269,7 +274,7 @@ class DiffimeInterp(nn.Module):
         elif self.config.diff_objective == "both":
             It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
             It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-            It_warp = It_warp.resize((512,512))
+            # It_warp = It_warp.resize((512,512))
             caption = generate_caption(It_warp, max_words=2, style=style)
             It_warp = self.pipeline(caption,
                                     negative_prompt="Blur. Bad Quality. Distorted. smudges.",
@@ -281,8 +286,6 @@ class DiffimeInterp(nn.Module):
             It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                                   torch.cat([feat1t[1], feat2t[1]], dim=1),
                                   torch.cat([feat1t[2], feat2t[2]], dim=1))
-
-
         return It_warp, F12, F21, F12in, F21in
 
 

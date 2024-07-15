@@ -28,7 +28,7 @@ controlnet_id = 'checkpoints/diffusers/diffusers/controlnet-canny-sdxl-1.0'
 # ip_adapter_id = './checkpoints/diffusers/adapters/h94/IP-adapter'
 ip_adapter_id = 'h94/IP-Adapter'
 
-store_path = 'outputs/canny_diffusion_test3'
+store_path = 'outputs/canny_diffusion'
 
 
 

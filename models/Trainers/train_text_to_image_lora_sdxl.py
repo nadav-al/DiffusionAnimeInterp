@@ -449,7 +449,9 @@ def parse_args(input_args=None):
     # Sanity checks
     if args.dataset_name is None and args.train_data_dir is None:
         raise ValueError("Need either a dataset name or a training folder.")
-
+    
+    args.resolution = (args.height, args.width)
+    
     return args
 
 
@@ -886,12 +888,14 @@ def main(input_args):
                 # flip
                 image = train_flip(image)
             if args.center_crop:
-                y1 = max(0, int(round((image.height - args.resolution) / 2.0)))
-                x1 = max(0, int(round((image.width - args.resolution) / 2.0)))
+                # y1 = max(0, int(round((image.height - args.resolution) / 2.0)))
+                # x1 = max(0, int(round((image.width - args.resolution) / 2.0)))
+                y1 = max(0, int(round((image.height - args.height) / 2.0)))
+                x1 = max(0, int(round((image.width - args.width) / 2.0)))
                 image = train_crop(image)
             else:
-                y1, x1, h, w = train_crop.get_params(image, (args.resolution, args.resolution))
-                # y1, x1, h, w = train_crop.get_params(image, args.resolution)
+                # y1, x1, h, w = train_crop.get_params(image, (args.resolution, args.resolution))
+                y1, x1, h, w = train_crop.get_params(image, args.resolution)
                 image = crop(image, y1, x1, h, w)
             crop_top_left = (y1, x1)
             crop_top_lefts.append(crop_top_left)
@@ -1062,8 +1066,8 @@ def main(input_args):
                 # time ids
                 def compute_time_ids(original_size, crops_coords_top_left):
                     # Adapted from pipeline.StableDiffusionXLPipeline._get_add_time_ids
-                    target_size = (args.resolution, args.resolution)
-                    # target_size = args.resolution
+                    # target_size = (args.resolution, args.resolution)
+                    target_size = args.resolution
                     add_time_ids = list(original_size + crops_coords_top_left + target_size)
                     add_time_ids = torch.tensor([add_time_ids])
                     add_time_ids = add_time_ids.to(accelerator.device, dtype=weight_dtype)

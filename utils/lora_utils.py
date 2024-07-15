@@ -30,7 +30,7 @@ def get_next_test_number(root_path, current_date):
     max_test_num = max(int(d[4:]) for d in existing_tests)
     return max_test_num + 1
 
-def generate_folder(folder_name, root_path="checkpoints/outputs/LoRAs", extension=None, unique_folder=False):
+def generate_folder(folder_name=None, root_path="checkpoints/outputs/LoRAs", extension=None, unique_folder=False):
     # Get current date in mm-dd format
     current_date = datetime.now().strftime("%m-%d")
     # Get the next test number
@@ -40,10 +40,16 @@ def generate_folder(folder_name, root_path="checkpoints/outputs/LoRAs", extensio
 
     # Create the full path
     # full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
-    if extension:
-        full_path = os.path.join(root_path, current_date, f"test{test_num}", extension, folder_name)
+    if folder_name is not None:
+        if extension:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension, folder_name)
+        else:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
     else:
-        full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
+        if extension:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension)
+        else:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}")
     # Create the directory
     os.makedirs(full_path, exist_ok=True)
 
