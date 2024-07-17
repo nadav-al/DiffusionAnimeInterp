@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from .DiffimeInterp import DiffimeInterp
 # from .Trainers.AniTrainer import LoraTrainerSimpler
 # from .Trainers.CustomTrainer import LoraT
@@ -8,33 +9,45 @@ import os
 import json
 
 
-class LoraInterp(DiffimeInterp):
+class LoraInterp(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, args=None):
-        super().__init__(path, config, init_diff=True, args=args)
-        # self.trainer = LoraTrainerSimpler(config, args)
+    def __init__(self, base_model):
+        super().__init__()
         self.trainer = LoRATrainer()
-        self.counter = 0
+        self.base_model = base_model
 
-    def train(self, folder, store_preprocess=True):
+    def train_lora_from_single_folder(self, folder, seed=0, max_crops=200, store_preprocess=True, unique_folder=False):
+        path = os.path.join("TempDatasets/07-17/test1", folder)
+        if os.path.exists(path):
+            apply_prep = False
+        else:
+            path = os.path.join(self.base_model.config.testset_root, folder)
+            apply_prep = True
+        print(path)
+        return self.trainer.train_single_folder(path, seed=seed, max_crops=max_crops, apply_preprocess=apply_prep,
+                                                store_preprocess=store_preprocess, unique_folder=unique_folder)
 
-
-    def forward(self, I1, I2, F12i, F21i, t, folder=None, store_preprocess=True, weights_path=None):
-        if weights_path is None or not os.path.exists(weights_path):
-            path = os.path.join("TempDatasets/07-09/test1", folder[0][0])
+    def train_lora_from_multi_folder(self, root=None, seed=0, max_crops=200, store_preprocess=True, unique_folder=False):
+        if not root:
+            path = self.base_model.config.testset_root
+            apply_prep = True
+        else:
+            path = os.path.join("TempDatasets/07-17/test1", os.path.split(root)[-1])
             if os.path.exists(path):
                 apply_prep = False
             else:
-                path = os.path.join(self.config.testset_root, folder[0][0])
+                path = root
                 apply_prep = True
-            weights_path = self.trainer.train(path, apply_preprocess=apply_prep, store_preprocess=store_preprocess, unique_folder=(self.counter == 0))
-            self.counter += 1
-        # self.pipeline.load_lora_weights(weights_path, weight_name="pytorch_lora_weights.safetensors", adapter_name="lora")
-        # # self.pipeline.set_adapters("lora")
-        # outputs = DiffimeInterp.forward(self, I1, I2, F12i, F21i, t, folder=folder)
-        # self.pipeline.unload_lora_weights()
-        # return outputs
-        return None
+        return self.trainer.train_multiple_folders(path, seed=seed, max_crops=max_crops, apply_preprocess=apply_prep,
+                                                   store_preprocess=store_preprocess, unique_folder=unique_folder)
+
+    def forward(self, I1, I2, F12i, F21i, t, folder=None, weights_path=None):
+        if weights_path is None:
+            raise OSError("Path to LoRA weights must be given")
+        self.base_model.pipeline.load_lora_weights(weights_path, weight_name="pytorch_lora_weights.safetensors")
+        outputs = self.base_model.forward(I1, I2, F12i, F21i, t, folder=folder)
+        self.base_model.pipeline.unload_lora_weights()
+        return outputs
 
 
 

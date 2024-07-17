@@ -11,7 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
-from utils.lora_utils import generate_caption
+from utils.lora_utils import generate_caption, extract_style_name
 
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
 from diffusers import StableDiffusionImg2ImgPipeline
@@ -48,7 +48,7 @@ class FeatureExtractor(nn.Module):
 
 class DiffimeInterp(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, init_diff=True, args=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, init_diff=True):
         super(DiffimeInterp, self).__init__()
 
         args = argparse.Namespace()
@@ -61,8 +61,13 @@ class DiffimeInterp(nn.Module):
         self.fwarp = ForwardWarp('summation')
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
 
+
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
+            self.flownet = nn.DataParallel(self.flownet)
+            self.feat_ext = nn.DataParallel(self.feat_ext)
+            self.fwarp = nn.DataParallel(self.fwarp)
+            self.synnet = nn.DataParallel(self.synnet)
         else:
             self.device = torch.device("cpu")
 
@@ -96,28 +101,16 @@ class DiffimeInterp(nn.Module):
                 dict2[key[7:]] = dict1[key]
             self.flownet.load_state_dict(dict2, strict=False)
 
-    def load_diffuser(self, type="image", controlnet=None):
+    def load_diffuser(self, type="image"):
         print("loading diffuser")
-        if controlnet is not None:
-            if type == "image":
-                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
-                                                                           controlnet=controlnet,
-                                                                           torch_dtype=torch.bfloat16, variant="fp16",
-                                                                           use_safetensors=True).to("cuda")
-            elif type == "text":
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
-                                                                          controlnet=controlnet,
-                                                                          torch_dtype=torch.bfloat16, variant="fp16",
-                                                                          use_safetensors=True).to("cuda")
-        else:
-            if type == "image":
-                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
-                                                                           torch_dtype=torch.bfloat16, variant="fp16",
-                                                                           use_safetensors=True).to("cuda")
-            elif type == "text":
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
-                                                                          torch_dtype=torch.bfloat16, variant="fp16",
-                                                                          use_safetensors=True).to("cuda")
+        if type == "image":
+            self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
+                                                                       torch_dtype=torch.bfloat16, variant="fp16",
+                                                                       use_safetensors=True).to("cuda")
+        elif type == "text":
+            self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
+                                                                      torch_dtype=torch.bfloat16, variant="fp16",
+                                                                      use_safetensors=True).to("cuda")
         print("diffuser loaded")
         self.pipeline.enable_model_cpu_offload()
 
@@ -132,8 +125,9 @@ class DiffimeInterp(nn.Module):
         I1o = (I1 - 0.5) / 0.5
         I2o = (I2 - 0.5) / 0.5
 
-        feat11, feat12, feat13 = self.feat_ext(I1o)
-        feat21, feat22, feat23 = self.feat_ext(I2o)
+        with torch.no_grad():
+            feat11, feat12, feat13 = self.feat_ext(I1o)
+            feat21, feat22, feat23 = self.feat_ext(I2o)
 
         return I1o, [feat11, feat12, feat13], I2o, [feat21, feat22, feat23]
 
@@ -171,16 +165,16 @@ class DiffimeInterp(nn.Module):
 
         I = I.cuda()
 
+        with torch.no_grad():
+            It = self.fwarp(I, Ft)
+            feat_t1 = self.fwarp(feat1, Ftd)
+            feat_t2 = self.fwarp(feat2, Ftdd)
+            feat_t3 = self.fwarp(feat3, Ftddd)
 
-        It = self.fwarp(I, Ft)
-        feat_t1 = self.fwarp(feat1, Ftd)
-        feat_t2 = self.fwarp(feat2, Ftdd)
-        feat_t3 = self.fwarp(feat3, Ftddd)
-
-        norm = self.fwarp(one0, Ft.clone())
-        norm_t1 = self.fwarp(one1, Ftd.clone())
-        norm_t2 = self.fwarp(one2, Ftdd.clone())
-        norm_t3 = self.fwarp(one3, Ftddd.clone())
+            norm = self.fwarp(one0, Ft.clone())
+            norm_t1 = self.fwarp(one1, Ftd.clone())
+            norm_t2 = self.fwarp(one2, Ftdd.clone())
+            norm_t3 = self.fwarp(one3, Ftddd.clone())
 
         return It, [feat_t1, feat_t2, feat_t3], norm, [norm_t1, norm_t2, norm_t3]
 
@@ -191,28 +185,25 @@ class DiffimeInterp(nn.Module):
         feat_t[2][norm_t[2] > 0] = feat_t[2].clone()[norm_t[2] > 0] / norm_t[2][norm_t[2] > 0]
 
     def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
-        # I1t_im = self.revtrans(I1t.cpu()[0])
         I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
-        # I2t_im = self.revtrans(I2t.cpu()[0])
         I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
-        # I1t_im = I1t_im.resize((512, 512))
-        # I2t_im = I2t_im.resize((512, 512))
         caption1 = generate_caption(I1t_im, max_words=2, style=style)
-        dI1t = self.pipeline(caption1,
-                             width=I1t_im.width, height=I1t_im.height,
-                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I1t_im, strength=0.5).images[0]
-        dI2t = self.pipeline(caption1,
-                             width=I2t_im.width, height=I2t_im.height,
-                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I2t_im, strength=0.5).images[0]
+        with torch.no_grad():
+            dI1t = self.pipeline(caption1,
+                                 width=I1t_im.width, height=I1t_im.height,
+                                 negative_prompt="Distorted. Black Spots. Bad Quality. ",
+                                 num_inferece_steps=30, image=I1t_im, strength=0.5).images[0]
+            dI2t = self.pipeline(caption1,
+                                 width=I2t_im.width, height=I2t_im.height,
+                                 negative_prompt="Distorted. Black Spots. Bad Quality. ",
+                                 num_inferece_steps=30, image=I2t_im, strength=0.5).images[0]
 
         # resize
         dI1t = dI1t.resize(self.config.test_size)
         dI2t = dI2t.resize(self.config.test_size)
 
 
-        path = self.config.store_path + '/' + folder[0][0] + '/latents'
+        path = os.path.join(self.config.store_path, folder, 'latents')
         if not os.path.exists(path):
             os.makedirs(path)
         I1t_im.save(path + '/I1t.png')
@@ -223,8 +214,10 @@ class DiffimeInterp(nn.Module):
         dI1t = self.trans(dI1t.convert('RGB')).to(self.device).unsqueeze(0)
         dI2t = self.trans(dI2t.convert('RGB')).to(self.device).unsqueeze(0)
         # synthesis
-        return self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
-                              torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
+        with torch.no_grad():
+            It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                                  torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
+        return It_warp
 
 
 
@@ -240,7 +233,7 @@ class DiffimeInterp(nn.Module):
         F12, F12in, F1ts = self.motion_calculation(I1o, I2o, F12i, [feat11, feat12, feat13], t, 0)
         F21, F21in, F2ts = self.motion_calculation(I2o, I1o, F21i, [feat21, feat22, feat23], t, 1)
 
-        # warping 
+        # warping
         I1t, feat1t, norm1, norm1t = self.warping(F1ts, I1, features1)
         I2t, feat2t, norm2, norm2t = self.warping(F2ts, I2, features2)
 
@@ -249,45 +242,41 @@ class DiffimeInterp(nn.Module):
         self.normalize(I1t, feat1t, norm1, norm1t)
         self.normalize(I2t, feat2t, norm2, norm2t)
 
-        if folder[0][0].startswith("Disney"):
-            style = "Disney"
-        else:
-            style = "Anime"
+        style = extract_style_name(folder)
 
         # diffusion
-        if self.config.diff_objective == "latents":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
+        with torch.no_grad():
+            if self.config.diff_objective == "latents":
+                It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
 
-        elif self.config.diff_objective == "result":
-            # synthesis
-            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
-                                  torch.cat([feat1t[1], feat2t[1]], dim=1),
-                                  torch.cat([feat1t[2], feat2t[2]], dim=1))
-            It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-            caption = generate_caption(It_warp, max_words=2, style=style)
-            It_warp = self.pipeline(caption,
-                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
-                                    num_inferece_steps=60, image=It_warp).images[0]
-            It_warp = It_warp.resize(self.config.test_size)
-            It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
+            elif self.config.diff_objective == "result":
+                # synthesis
+                It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                                      torch.cat([feat1t[1], feat2t[1]], dim=1),
+                                      torch.cat([feat1t[2], feat2t[2]], dim=1))
+                It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+                caption = generate_caption(It_warp, max_words=2, style=style)
+                It_warp = self.pipeline(caption,
+                                        negative_prompt="Blur. Bad Quality. Distorted. smudges.",
+                                        num_inferece_steps=60, image=It_warp).images[0]
+                It_warp = It_warp.resize(self.config.test_size)
+                It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 
-        elif self.config.diff_objective == "both":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
-            It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-            # It_warp = It_warp.resize((512,512))
-            caption = generate_caption(It_warp, max_words=2, style=style)
-            It_warp = self.pipeline(caption,
-                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
-                                    num_inferece_steps=60, image=It_warp).images[0]
-            It_warp = It_warp.resize(self.config.test_size)
-            It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
+            elif self.config.diff_objective == "both":
+                It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
+                It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+                caption = generate_caption(It_warp, max_words=2, style=style)
+                It_warp = self.pipeline(caption,
+                                        negative_prompt="Blur. Bad Quality. Distorted. smudges.",
+                                        num_inferece_steps=60, image=It_warp).images[0]
+                It_warp = It_warp.resize(self.config.test_size)
+                It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 
-        else:
-            It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
-                                  torch.cat([feat1t[1], feat2t[1]], dim=1),
-                                  torch.cat([feat1t[2], feat2t[2]], dim=1))
+            else:
+                It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+                                      torch.cat([feat1t[1], feat2t[1]], dim=1),
+                                      torch.cat([feat1t[2], feat2t[2]], dim=1))
         return It_warp, F12, F21, F12in, F21in
-
 
 
 

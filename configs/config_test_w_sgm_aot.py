@@ -5,9 +5,9 @@ prefix = 'Datasets_root/'
 # test_flow_root = prefix + 'datasets/test_2k_pre_calc_sgm_flows'
 # test_annotation_root = prefix + 'Datasets_root/test_2k_annotations/'
 
-# prefix = 'D:/University/ForthYear/GuidedProject/other_animations'
-testset_root = prefix + 'other_animations/full_shots/'
-test_flow_root = prefix + 'other_animations/AoT_sgm_flows/'
+# prefix = 'D:/University/ForthYear/GuidedProject/AoT'
+testset_root = prefix + 'AoT/full_shots/'
+test_flow_root = prefix + 'AoT/AoT_sgm_flows/'
 
 test_size = (960, 540)
 test_crop_size = (960, 540)

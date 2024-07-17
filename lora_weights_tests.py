@@ -9,7 +9,7 @@ diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 lora_path = "checkpoints/outputs/LoRAs/07-05/test4"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-08/animegine/test2"
+output_path = "outputs/old_tests/weights_tests/07-08/animegine/test2"
 
 ns = 20  # Num inference steps
 

@@ -10,7 +10,7 @@ diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 lora_path = "checkpoints/outputs/LoRAs/07-09/test13"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-10/sdxl/test1"
+output_path = "outputs/old_tests/weights_tests/07-10/sdxl/test1"
 
 ns = 20  # Num inference steps
 

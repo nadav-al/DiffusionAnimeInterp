@@ -3,8 +3,8 @@ prefix = 'D:/University/ForthYear/GuidedProject/atd_12k/'
 # test_flow_root = prefix + 'datasets/test_2k_pre_calc_sgm_flows'
 # test_annotation_root = prefix + 'datasets/test_2k_annotations/'
 
-# prefix = 'D:/University/ForthYear/GuidedProject/other_animations'
-prefix = 'Datasets_root/other_animations/'
+# prefix = 'D:/University/ForthYear/GuidedProject/AoT'
+prefix = 'Datasets_root/AoT/'
 testset_root = prefix + 'full_shots/'
 test_flow_root = prefix + 'AoT_sgm_flows/'
 

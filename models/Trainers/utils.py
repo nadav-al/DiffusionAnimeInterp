@@ -4,18 +4,18 @@ from datetime import datetime
 
 import cv2
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForCausalLM, PaliGemmaForConditionalGeneration
+from transformers import BlipProcessor, BlipForConditionalGeneration
 import numpy as np
+import torch
 import json
 
 
-# custom_cache_dir = "/cs/labs/danix/nadav_al/AnimeInterp/checkpoints/Blip"
-# os.environ['HF_HOME'] = custom_cache_dir
+custom_cache_dir = "/cs/labs/danix/nadav_al/AnimeInterp/checkpoints/Blip"
+os.environ['HF_HOME'] = custom_cache_dir
 #
-# # Set up the BLIP image captioning model
-# processor = AutoProcessor.from_pretrained("microsoft/Florence-2-base", cache_dir=custom_cache_dir, trust_remote_code=True)
-# model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", cache_dir=custom_cache_dir, trust_remote_code=True)
-# model = PaliGemmaForConditionalGeneration.from_pretrained("microsoft/Florence-2-large", cache_dir=custom_cache_dir, trust_remote_code=True)
+# Set up the BLIP image captioning model
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base", cache_dir=custom_cache_dir)
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base", cache_dir=custom_cache_dir, torch_dtype=torch.float16).to("cuda")
 
 def get_next_test_number(root_path, current_date):
     test_dir = os.path.join(root_path, current_date)
@@ -30,7 +30,7 @@ def get_next_test_number(root_path, current_date):
     max_test_num = max(int(d[4:]) for d in existing_tests)
     return max_test_num + 1
 
-def generate_folder(folder_name, root_path="checkpoints/outputs/LoRAs", extension=None, unique_folder=False):
+def generate_folder(folder_name=None, root_path="sd-model-fintuned-lora", extension=None, unique_folder=False):
     # Get current date in mm-dd format
     current_date = datetime.now().strftime("%m-%d")
     # Get the next test number
@@ -40,10 +40,16 @@ def generate_folder(folder_name, root_path="checkpoints/outputs/LoRAs", extensio
 
     # Create the full path
     # full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
-    if extension:
-        full_path = os.path.join(root_path, current_date, f"test{test_num}", extension, folder_name)
+    if folder_name is not None:
+        if extension:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension, folder_name)
+        else:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
     else:
-        full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
+        if extension:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension)
+        else:
+            full_path = os.path.join(root_path, current_date, f"test{test_num}")
     # Create the directory
     os.makedirs(full_path, exist_ok=True)
 
@@ -65,7 +71,7 @@ def random_size_crop(img, size, target_size, min_crop_ratio, max_crop_ratio, num
     crop_width, crop_height = size
     crops = []
     for _ in range(num_crops):
-        crop_ratio = random.randint(int(min_crop_ratio*10), int(max_crop_ratio*10))
+        crop_ratio = random.randint(int(min_crop_ratio*10), int(max_crop_ratio*10)+1)
         aug_crop_width = int(crop_width * (crop_ratio/10))
         aug_crop_height = int(crop_height * (crop_ratio/10))
         if aug_crop_height > height:
@@ -120,44 +126,13 @@ def jitter_random_crop(img, size, target_size, min_crop_ratio=0.6, max_crop_rati
             # Resize the crop to the final desired size
             resized_crop = cropped.resize((target_size, target_size), Image.LANCZOS)
             crops.append(resized_crop)
-    print()
     return crops
-
-
-# def calculate_color_std(image):
-#     # Convert PIL Image to numpy array
-#     np_image = np.array(image)
-#     mean = np.mean(np_image)
-#     print(mean.shape)
-#     # print(f"max color value = ", np.max(mean, axis=(0,1)), " ; min color value = ", np.min(mean, axis=(0,1)))
-#     return np.sum(np.var(np_image, axis=(0, 1), ddof=1))/3
 
 def calculate_color_std(image):
     img_array = np.array(image)
-
-    # Reshape the image to a 2D array of pixels
-    # pixels = img_array.reshape(-1, 3)
     img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
     img_array = img_array.astype(np.float32) / 255.0
     return np.mean(img_array)
-    # Calculate the variance for each channel
-    # std_r = np.std(img_array[:, 0])
-    # std_g = np.std(img_array[:, 1])
-    # std_b = np.std(img_array[:, 2])
-    # # std_r = np.mean(pixels[:, 0])
-    # # std_g = np.mean(pixels[:, 1])
-    # # std_b = np.mean(pixels[:, 2])
-    #
-    # # Calculate the overall color variance (you can use different methods here)
-    # # overall_std = np.sqrt((std_r**2 + std_g**2 + std_b**2))/3
-    # overall_std = np.mean([std_r, std_g, std_b])
-    # # print({
-    # #     "red": std_r,
-    # #     "green": std_g,
-    # #     "blue": std_b,
-    # #     "overall": overall_std
-    # # })
-    # return overall_std
 
 
 
@@ -175,12 +150,44 @@ def filter_crops(crops, img_mean, threshold):
         else:
             d_crops.append(crop)
             dec.append(std)
-    print(f"image mean value = {img_mean}, with threshold = 1/{img_mean/threshold}")
-    print(f"accepted crops' mean value = {np.median(acc)}")
-    print(f"declined crops' mean value = {np.median(dec)}")
     return f_crops, d_crops
 
-def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, max_ratio=1.3, overlap=0.3, num_crops=10, methods=None, unique_folder=False, save_folder=True):
+sizes = [0.4, 0.55, 0.6, 0.65, 0.72, 0.78, 0.85, 0.9, 0.95, 1]
+repeats = [2, 2, 2, 3, 2, 3, 2, 2, 1, 1]
+
+def generate_crops_from_image(img, repeat=1, num_crops=0, methods=None):
+    total_crops = []
+    sampled = False
+    for _ in range(repeats):
+        for j in range(len(sizes)):
+            crops = []
+            w_crop_ratio = random.randint(int(img.height * sizes[j]), int(img.width * sizes[j]))
+            h_crop_ratio = random.randint(int(img.height * sizes[j]), int(img.width * sizes[j]))
+            h_crop_ratio = min(h_crop_ratio, img.height)
+
+            for i in range(repeats[j]):
+                l1 = random.randint(0, img.width - w_crop_ratio)
+                # l2 = random.randint(0, img.width - w_crop_ratio)
+                # left = (0 + l1 + l2) // 3
+                left = l1
+                t1 = random.randint(0, img.height - h_crop_ratio)
+                # t2 = random.randint(0, img.height - h_crop_ratio)
+                # t3 = random.randint(0, img.height - h_crop_ratio)
+                # top = (t1 + t2 + t3) // 3
+                top = t1
+                cropped = img.crop((left, top, left + w_crop_ratio, top + h_crop_ratio))
+                crops.append(cropped)
+            if num_crops > 0 and len(crops) > num_crops:
+                sampled = True
+                crops = random.sample(crops, num_crops)
+            total_crops += crops
+        if num_crops > 0 and not sampled:
+            total_crops = random.sample(total_crops, num_crops)
+    return total_crops
+
+
+def preprocess_single_folder(images_folder, num_crops=0, max_crops=100, methods=None, unique_folder=False,
+                             save_folder=True):
     output_folder = ""
     if save_folder:
         output_folder = generate_folder(os.path.split(images_folder)[1], "TempDatasets", unique_folder=unique_folder)
@@ -188,77 +195,79 @@ def preprocess(images_folder, size=(512, 512), target_size=512, min_ratio=0.7, m
         methods = [Methods.JITTER_RANDOM]
     image_files = os.listdir(images_folder)
     image_files.sort()
-    sizes = [0.4, 0.55, 0.6, 0.65, 0.72, 0.78, 0.85, 0.9, 0.95]
-    repeats = [1, 2, 3, 2, 1, 2, 4, 4, 3]
+    all_crops = []
+    total_amount = 0
     for idx, image_name in enumerate(image_files):
-        if idx >= 3 or idx == 1 or not image_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
+        if not image_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
             continue
         image_path = os.path.join(images_folder, image_name)
+        image_name = os.path.splitext(image_name)[0]
         with Image.open(image_path) as img:
-            # g_size = (int(img.height * 0.8), int(img.height * 0.7))
-            img_mean = calculate_color_std(img)
-            total_crops = []
-            for threshold in range(7, 3, -1):
-                if len(total_crops) >= 40:
-                    break
-                crops = []
-                for j in range(len(sizes)):
-                    g_size = int(img.height*sizes[j])
-                    for i in range(repeats[j]):
-                        left = random.randint(0, img.width - g_size)
-                        top = random.randint(0, img.height - g_size)
-                        cropped = img.crop((left, top, left+g_size, top+g_size))
-                        # resized = cropped.resize((target_size, target_size))
-                        # crops.append(resized)
-                        crops.append(cropped)
-                # for method in methods:
-                #     if method == Methods.RANDOM_CROP:
-                #         crops += random_size_crop(img, g_size, target_size, 1.0, 1.0, int(2 * num_crops / 3))
-                #         crops += random_size_crop(img, size, target_size, 0.8, 0.9, int(num_crops / 3))
-                #     elif method == Methods.RANDOM_SIZE:
-                #         crops += random_size_crop(img, g_size, target_size, min_ratio, max_ratio, int(2 * num_crops / 3))
-                #         crops += random_size_crop(img, size, target_size, 0.8, 0.9, int(num_crops / 3))
-                #     elif method == Methods.GRID:
-                #         crops += jitter_random_crop(img, size, target_size, 1.0, 1.0, jitter_range=0, overlap=overlap)
-                #     elif method == Methods.JITTER:
-                #         crops += jitter_random_crop(img, size, target_size, 1.0, 1.0, overlap=overlap)
-                #     elif method == Methods.GRID_RANDOM:
-                #         crops += jitter_random_crop(img, size, target_size, min_ratio, max_ratio, jitter_range=0, overlap=overlap)
-                #     elif method == Methods.JITTER_RANDOM:
-                #         crops += jitter_random_crop(img, size, target_size, min_ratio, max_ratio, overlap=overlap)
-                #     else:
-                #         raise ValueError(f"Unknown method: {method}")
+            crops = generate_crops_from_image(img, num_crops)
+            all_crops.append([image_name, crops])
+            total_amount += len(crops)
 
-                f_crops, d_crops = filter_crops(crops, img_mean, img_mean/threshold)
-                print(len(f_crops), " crops remains out of ", len(crops))
-                total_crops += f_crops
-                print("total crops for this frame: ", len(total_crops))
-            # final_mean = np.mean([calculate_color_std(c) for c in total_crops])
-            # final_std = np.std([calculate_color_std(c) for c in total_crops])
-            # print("final mean = ", final_mean)
-            # print("final std = ", final_std)
-            # final_crops, _ = filter_crops(total_crops, final_mean, final_mean/10)
-            # print(len(final_crops), " final crops remains out of ", len(total_crops), " total crops")
-                # final_crops = random.sample(final_crops, min(len(final_crops), num_crops))
-            for i, crop in enumerate(total_crops):
-                output_path = os.path.join(output_folder,
-                                           f"{os.path.splitext(image_name)[0]}_crop{i + 1}.png")
 
+    do_sample = False
+    sample_rate = max_crops
+    if total_amount > max_crops:
+        do_sample = True
+        sample_rate = max_crops // len(all_crops)
+
+    for i, crop_data in enumerate(all_crops):
+        image_name, crop_lst = crop_data
+        if do_sample:
+            crop_lst = random.sample(crop_lst, sample_rate)
+
+        if save_folder:
+            for crop in crop_lst:
+                output_path = os.path.join(output_folder, f"{image_name}_crop{i + 1}.png")
                 crop.save(output_path)
-            img.save(os.path.join(output_folder, f"{os.path.splitext(image_name)[0]}.png"))
-    return output_folder
+            img.save(os.path.join(output_folder, f"{image_name}_1.png"))
+            img.save(os.path.join(output_folder, f"{image_name}_2.png"))
+        else:
+            all_crops[i][1] = crop_lst
+    return output_folder if save_folder else all_crops
+
+
+def preprocess_multiple_folders(root, num_crops=0, max_crops=100, methods=None, unique_folder=False, save_folder=True):
+    root_name = os.path.split(root)[1]
+    output_folder = ""
+    if save_folder:
+        output_folder = generate_folder(root_name, "TempDatasets", unique_folder=unique_folder)
+    if methods is None:
+        methods = [Methods.JITTER_RANDOM]
+    folders = os.listdir(root)
+    folders.sort()
+    all_crops = []
+    total_amount = 0
+    for folder in folders:
+        folder_crops = preprocess_single_folder(os.path.join(root, folder), num_crops=num_crops, methods=methods, unique_folder=unique_folder, save_folder=False)
+        for image_name, crop_lst in folder_crops:
+            total_amount += len(crop_lst)
+            for i, crop in enumerate(crop_lst):
+                all_crops.append([folder, image_name, i, crop])
+
+    if len(all_crops) > max_crops:
+        all_crops = random.sample(all_crops, max_crops)
+
+    if save_folder:
+        for crop_data in all_crops:
+            folder, image_name, i, crop = crop_data
+            output_path = os.path.join(output_folder, f"{folder}_{image_name}_crop{i}.png")
+            crop.save(output_path)
+
+    return output_folder if save_folder else all_crops
+
 
 
 UNIQUE_TOKEN = 'dinep'
 KEYWORDS = {
+    UNIQUE_TOKEN,
     'best quality',
+    'high quality',
     'cel shading',
-    # f'{UNIQUE_TOKEN} Anime',
-    # 'Anime',
-    # 'Disney-Renaissance',
-    # f'{UNIQUE_TOKEN} Disney',
     'colorfull',
-    'animation',
     'drawing',
     'Cartoon',
     'Classic Cartoon',
@@ -273,32 +282,50 @@ KEYWORDS = {
     'Hand-Drawn',
     '2D',
 }
-def generate_caption(min_words=1, max_words=len(KEYWORDS), style="Disney"):
-    num_words = random.randint(min_words, min(max_words, len(KEYWORDS)))
-    selected_keywords = random.sample(KEYWORDS, num_words)
-    selected_keywords.append(style)
-    random.shuffle(selected_keywords)
+STYLE_TOKENS = {
+    'Disney': ['Disney-Renaissance', f'{UNIQUE_TOKEN} Disney', 'Disney', 'Animation'],
+    'Anime': ['Anime', 'StudioGhibli', f'{UNIQUE_TOKEN} Anime', f'Ghibli {UNIQUE_TOKEN}'],
+    'Pixar': ['Pixar', f'{UNIQUE_TOKEN} Pixar', '3D', f'3D {UNIQUE_TOKEN}'],
+    'Animation': ['Animation', f'{UNIQUE_TOKEN} Animation', f'{UNIQUE_TOKEN} Drawing']
+}
+
+def generate_caption(image, min_words=1, max_words=len(KEYWORDS), style="Disney"):
+    num_words = random.randint(min_words, min(max_words+1, len(KEYWORDS)))
+    selected_keywords_lst = random.sample(KEYWORDS, num_words)
+    style_keyword = random.sample(STYLE_TOKENS[style], 1)[0]
+    indicator = random.randint(0, 4)
+    if indicator == 2:
+        style_keyword.replace(" ", "-")
+    elif indicator == 3:
+        style_keyword.replace(" ", "")
+
+    selected_keywords_lst.append(style_keyword)
+    random.shuffle(selected_keywords_lst)
 
     # Concatenate the keywords with a space in between
-    caption = ", ".join(selected_keywords)
-    return f"{UNIQUE_TOKEN} style, high quality, " + caption
+    selected_keywords = ", ".join(selected_keywords_lst)
+
+    inputs = processor(image, return_tensors="pt").to("cuda", torch.float16)
+    out = model.generate(**inputs)
+    caption = processor.decode(out[0], skip_special_tokens=True)
+    return f"{caption}; {selected_keywords}"
 
 
 
-def generate_metadata(directory):
+def generate_metadata(directory, multi_folder=False):
     output_file = os.path.join(directory, "metadata.jsonl")
-    if directory.startswith("Disney"):
-        style = "Disney"
-    else:
-        style = "Anime"
+    if not multi_folder:
+        style = extract_style_name(directory)
     with open(output_file, 'w') as f:
-        length = len(os.listdir(directory))
         for filename in os.listdir(directory):
             if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
                 continue
+            if multi_folder:
+                style = extract_style_name(filename)
             image_path = os.path.join(directory, filename)
             try:
-                caption = generate_caption(min_words=1, max_words=3, style=style)
+                image = Image.open(image_path)
+                caption = generate_caption(image, min_words=2, max_words=4, style=style)
                 json_line = json.dumps({
                     "file_name": filename,
                     "text": caption
@@ -308,3 +335,13 @@ def generate_metadata(directory):
                 print(f"Error processing {image_path}: {str(e)}")
 
     print(f"Metadata has been written to {output_file}")
+
+
+def extract_style_name(folder):
+    if folder.startswith("Disney"):
+        return "Disney"
+    elif folder.startswith("Pixar"):
+        return "Pixar"
+    elif folder.startswith("Japan"):
+        return "Anime"
+    return "Animation"
