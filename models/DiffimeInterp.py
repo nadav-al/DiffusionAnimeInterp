@@ -11,7 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
-from utils.lora_utils import generate_caption
+from utils.image_processing import generate_caption
 
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
 from diffusers import StableDiffusionImg2ImgPipeline
@@ -63,6 +63,10 @@ class DiffimeInterp(nn.Module):
 
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
+            self.flownet = nn.DataParallel(self.flownet)
+            self.feat_ext = nn.DataParallel(self.feat_ext)
+            self.fwarp = nn.DataParallel(self.fwarp)
+            self.synnet = nn.DataParallel(self.synnet)
         else:
             self.device = torch.device("cpu")
 
@@ -212,7 +216,7 @@ class DiffimeInterp(nn.Module):
         dI2t = dI2t.resize(self.config.test_size)
 
 
-        path = self.config.store_path + '/' + folder[0][0] + '/latents'
+        path = self.config.store_path + '/' + folder + '/latents'
         if not os.path.exists(path):
             os.makedirs(path)
         I1t_im.save(path + '/I1t.png')
@@ -249,7 +253,7 @@ class DiffimeInterp(nn.Module):
         self.normalize(I1t, feat1t, norm1, norm1t)
         self.normalize(I2t, feat2t, norm2, norm2t)
 
-        if folder[0][0].startswith("Disney"):
+        if folder.startswith("Disney"):
             style = "Disney"
         else:
             style = "Anime"

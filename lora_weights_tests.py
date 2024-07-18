@@ -1,7 +1,7 @@
 from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 import os
 from PIL import Image
-from utils.lora_utils import generate_caption
+from utils.image_processing import generate_caption
 
 # diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"

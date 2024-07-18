@@ -16,16 +16,15 @@ class LoraInterp(DiffimeInterp):
         self.trainer = LoRATrainer()
         self.counter = 0
 
-    def train(self, folder, store_preprocess=True):
-
 
     def forward(self, I1, I2, F12i, F21i, t, folder=None, store_preprocess=True, weights_path=None):
         if weights_path is None or not os.path.exists(weights_path):
-            path = os.path.join("TempDatasets/07-09/test1", folder[0][0])
+            path = os.path.join("TempDatasets/07-17/test1", folder)
             if os.path.exists(path):
+                # print('Back to the future! ', path)
                 apply_prep = False
             else:
-                path = os.path.join(self.config.testset_root, folder[0][0])
+                path = os.path.join(self.config.testset_root, folder)
                 apply_prep = True
             weights_path = self.trainer.train(path, apply_preprocess=apply_prep, store_preprocess=store_preprocess, unique_folder=(self.counter == 0))
             self.counter += 1

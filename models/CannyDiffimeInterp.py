@@ -11,7 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 from .DiffimeInterp import DiffimeInterp
-from utils.lora_utils import generate_caption
+from utils.image_processing import generate_caption
 
 from transformers import CLIPVisionModelWithProjection
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image

@@ -10,7 +10,7 @@ import sys
 import cv2
 from utils.vis_flow import flow_to_color
 from utils.config import Config
-from utils.lora_utils import generate_folder
+from utils.image_processing import generate_folder
 
 import numpy as np
 from diffusers import StableDiffusionXLImg2ImgPipeline
@@ -88,7 +88,10 @@ def validate(config, args):
             print('Testing {}/{}-th group...'.format(validationIndex+1, len(testset)))
             sys.stdout.flush()
             sample, flow, index, folder = validationData
-            store_path = generate_folder(root_path=config.store_path, unique_folder=True)
+            if validationIndex == 0:
+                print(folder[0][0])
+                continue
+            # store_path = generate_folder(root_path=config.store_path, unique_folder=False)
             first_frame = sample[0]
             last_frame = sample[-1]
 
@@ -111,32 +114,42 @@ def validate(config, args):
 
             # save the first and last frame
             print(store_path, os.path.exists(store_path))
-            # revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
-            # revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
+            if store_path.endswith(folder[0][0]):
+                revtrans(I1.cpu()[0]).save(store_path + '/frame1.png')
+                revtrans(I2.cpu()[0]).save(store_path + f'/frame{num_of_frames + 2}.png')
+            else:
+                revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
+                revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
 
             x = num_of_frames
-            for tt in range(num_of_frames):
-                t = 1.0 / (x + 1) * (tt + 1)
-                if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-                    outputs = model(I1, I2, F12i, F21i, t)
-                elif config.model == 'LoraInterp':
-                    outputs = model(I1, I2, F12i, F21i, t, folder=folder)
-                else:
-                    outputs = model(I1, I2, F12i, F21i, t, folder=folder)
+            try:
+                for tt in range(num_of_frames):
+                    t = 1.0 / (x + 1) * (tt + 1)
+                    if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
+                        outputs = model(I1, I2, F12i, F21i, t)
+                    elif config.model == 'LoraInterp':
+                        outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
+                    else:
+                        outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
 
-                if outputs is None:
-                    continue
+                    if outputs is None:
+                        continue
 
-                It_warp =   outputs[0]
+                    It_warp = outputs[0]
 
-                warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-                # warp_img = refiner_pipe(image=warp_img).images[0]
-                warp_img.save(store_path + '/' + folder[1][0] + f'/frame{tt+2}.png')
-
-                if tt == 0:
-                    save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/flows/F12')
-                    save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/flows/F21')
-
+                    warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+                    if store_path.endswith(f'/{folder[1][0]}'):
+                        warp_img.save(store_path + f'/frame{tt+2}.png')
+                        if tt == 0:
+                            save_flow_to_img(outputs[1].cpu(), store_path + '/flows/F12')
+                            save_flow_to_img(outputs[2].cpu(), store_path + '/flows/F21')
+                    else:
+                        warp_img.save(store_path + '/' + folder[1][0] + f'/frame{tt+2}.png')
+                        if tt == 0:
+                            save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/flows/F12')
+                            save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/flows/F21')
+            except Exception as e:
+                print(e)
 
 if __name__ == "__main__":
 

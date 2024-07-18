@@ -1,22 +1,22 @@
 from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 import os
 from PIL import Image
-from utils.lora_utils import generate_caption
+from utils.image_processing import generate_caption
 import torch
 
 diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 # diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
-lora_path = "checkpoints/outputs/LoRAs/07-09/test13"
+lora_path = "checkpoints/outputs/LoRAs/07-17/test4"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-10/sdxl/test1"
+output_path = "outputs/weights_tests/07-17/sdxl/test1"
 
 ns = 20  # Num inference steps
 
 
 def get_image_path(scene):
-    return f"outputs/test_aot_DiffimeInterp_latents/{scene}/frame2.png"
+    return f"outputs/old_tests/test_aot_DiffimeInterp_latents/{scene}/frame2.png"
 
 
 if __name__ == '__main__':
@@ -40,9 +40,11 @@ if __name__ == '__main__':
         if not os.path.exists(output_root_folder):
             os.makedirs(output_root_folder)
         caption = generate_caption(image, max_words=3, style="Anime")
+        print(folder_list)
         for idx, folder_name in enumerate(folder_list):
             folder_path = os.path.join(root_path, folder_name)
-            if not os.path.isfile(folder_path):
+            if not os.path.isdir(folder_path):
+                print("wait what?! ", folder_name)
                 continue
 
             # Check if it's a directory
@@ -67,4 +69,3 @@ if __name__ == '__main__':
                               width=image.width, height=image.height,
                               image=image, num_inference_steps=ns, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
             output.save(os.path.join(output_root_folder, f"{folder_name}.png"))
-            break

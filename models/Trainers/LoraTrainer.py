@@ -1,7 +1,9 @@
 import os
 import shutil
 import argparse
-from utils.lora_utils import generate_metadata, preprocess, generate_folder, Methods
+from utils.image_processing import preprocess_single_scene
+from utils.files_and_folders import generate_folder
+from utils.captionning import generate_metadata
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -14,17 +16,6 @@ def parse_args():
     parser.add_argument(
         "--multi_gpu",
         action="store_true",
-    )
-    parser.add_argument(
-        "--data_path",
-        type=str,
-        default=None,
-        required=True,
-        help=(
-            "A folder containing the training data. Folder contents must follow the structure described in"
-            " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
-            " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
-        )
     )
     parser.add_argument(
         "--output_path",
@@ -40,9 +31,6 @@ def parse_args():
     )
 
     args, _ = parser.parse_known_args()
-
-    if args.data_path is None:
-        raise ValueError("Need a path for the trainin dataset")
 
     return args
 
@@ -72,19 +60,19 @@ class LoRATrainer:
         else:
             self.multi_gpu = ""
 
-        self.methods = [Methods.RANDOM_SIZE, Methods.JITTER_RANDOM]
+        # self.methods = [Methods.RANDOM_SIZE, Methods.JITTER_RANDOM]
 
     def train(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False):
         folder = os.path.split(path)[-1]
         if apply_preprocess:
-            path = preprocess(path, size=(300, 300), target_size=512, methods=self.methods, unique_folder=unique_folder)
+            path = preprocess_single_scene(path, unique_folder=unique_folder)
             generate_metadata(path)
         else:
             store_preprocess = True  # We don't want to erase the original data directory
 
         output_path = generate_folder(folder, unique_folder=unique_folder)
-        output_path = os.path.join("checkpoints/outputs/LoRAs/07-09/test13", folder)
-        print(path)
+        # output_path = os.path.join("checkpoints/outputs/LoRAs/07-17/test6", folder)
+        # print(path)
         os.system(
             f"accelerate launch {self.multi_gpu} models/Trainers/{self.script_name}.py \
                       --pretrained_model_name_or_path={self.diff_path} \
@@ -99,13 +87,13 @@ class LoRATrainer:
                       --snr_gamma=5 \
                       --lr_warmup_steps=0 \
                       --output_dir={output_path} \
-                      --num_train_epochs=10 \
+                      --num_train_epochs=100 \
                       --checkpointing_steps=50 \
                       --resume_from_checkpoint='latest' \
                       --scale_lr")
 
         if not store_preprocess:
-            shutil.rmtree(output_path)
+            shutil.rmtree(path)
 
         return output_path
 
