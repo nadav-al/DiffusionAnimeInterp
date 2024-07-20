@@ -1,18 +1,18 @@
 from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 import os
 from PIL import Image
-from utils.image_processing import generate_caption
+from utils.captionning import generate_caption
 import torch
 
 diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 # diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
-lora_path = "checkpoints/outputs/LoRAs/07-17/test4"
+lora_path = "checkpoints/outputs/LoRAs/07-17/test6"
 weight_name = "pytorch_lora_weights.safetensors"
 
-output_path = "outputs/weights_tests/07-17/sdxl/test1"
+output_path = "outputs/weights_tests/07-17/sdxl/test2"
 
-ns = 20  # Num inference steps
+ns = 25  # Num inference steps
 
 
 def get_image_path(scene):
@@ -42,13 +42,14 @@ if __name__ == '__main__':
         caption = generate_caption(image, max_words=3, style="Anime")
         print(folder_list)
         for idx, folder_name in enumerate(folder_list):
+            if idx > 86:
+                break
             folder_path = os.path.join(root_path, folder_name)
             if not os.path.isdir(folder_path):
-                print("wait what?! ", folder_name)
                 continue
 
             # Check if it's a directory
-            if idx%15 == 0:
+            if idx%10 == 0:
                 print(f"Processing {folder_name}")
             # Construct the path to the LoRA weights file
             lora_weights_path = folder_path
@@ -64,8 +65,10 @@ if __name__ == '__main__':
                     print(f"Error processing {folder_name}: {str(e)}")
             else:
                 print(f"No LoRA weights found in {folder_name}")
-
-            output = pipeline(caption,
-                              width=image.width, height=image.height,
-                              image=image, num_inference_steps=ns, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
-            output.save(os.path.join(output_root_folder, f"{folder_name}.png"))
+            for step in range(5, ns, 5):
+                output = pipeline(caption,
+                                  width=image.width, height=image.height,
+                                  image=image, num_inference_steps=step, negative_prompt="disfigure. bad anatomy. blurry. poorly drawn face. poor facial details. hyperrealistic. 3D").images[0]
+                if not os.path.exists(os.path.join(output_root_folder, folder_name)):
+                    os.makedirs(os.path.join(output_root_folder, folder_name))
+                output.save(os.path.join(output_root_folder, folder_name, f"{step}_steps.png"))

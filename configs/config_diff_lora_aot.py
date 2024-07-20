@@ -6,8 +6,8 @@ prefix = 'Datasets_root/'
 
 # prefix = 'D:/University/ForthYear/GuidedProject/other_animations'
 # prefix = ''
-testset_root = prefix + 'other_animations/full_shots/'
-test_flow_root = prefix + 'other_animations/AoT_sgm_flows/'
+testset_root = prefix + 'AoT/full_shots/'
+test_flow_root = prefix + 'AoT/AoT_sgm_flows/'
 
 test_size = (960, 540)
 test_crop_size = (960, 540)
@@ -17,11 +17,13 @@ test_crop_size = (960, 540)
 mean = [0., 0., 0.]
 std = [1, 1, 1]
 
-seed = 2024
+seed = 0
 
 inter_frames = 1
 
 model = 'LoraInterp'
+lora_weights_path = "checkpoints/outputs/LoRAs/07-17/test6"
+multiscene = False
 pwc_path = None
 
 checkpoint = 'checkpoints/anime_interp_full.ckpt'
@@ -29,7 +31,9 @@ diff_path = 'checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0'
 # diff_path = 'checkpoints/diffusers/runwayml/stable-diffusion-v1-5'
 # diff_path = 'CompVis/stable-diffusion-v1-4'
 
-diff_objective = 'both'
+
+
+diff_objective = 'latents'
 # diff_objective = None
 
 store_path = 'outputs/test_aot_DiffimeInterp_lora/'

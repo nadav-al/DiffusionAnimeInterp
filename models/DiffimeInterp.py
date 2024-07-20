@@ -11,7 +11,8 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
-from utils.image_processing import generate_caption
+from utils.captionning import generate_caption
+from utils.files_and_folders import extract_style_name, generate_folder
 
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
 from diffusers import StableDiffusionImg2ImgPipeline
@@ -63,10 +64,10 @@ class DiffimeInterp(nn.Module):
 
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
-            self.flownet = nn.DataParallel(self.flownet)
-            self.feat_ext = nn.DataParallel(self.feat_ext)
-            self.fwarp = nn.DataParallel(self.fwarp)
-            self.synnet = nn.DataParallel(self.synnet)
+            # self.flownet = nn.DataParallel(self.flownet)
+            # self.feat_ext = nn.DataParallel(self.feat_ext)
+            # self.fwarp = nn.DataParallel(self.fwarp)
+            # self.synnet = nn.DataParallel(self.synnet)
         else:
             self.device = torch.device("cpu")
 
@@ -194,13 +195,15 @@ class DiffimeInterp(nn.Module):
         feat_t[1][norm_t[1] > 0] = feat_t[1].clone()[norm_t[1] > 0] / norm_t[1][norm_t[1] > 0]
         feat_t[2][norm_t[2] > 0] = feat_t[2].clone()[norm_t[2] > 0] / norm_t[2][norm_t[2] > 0]
 
+        return It, feat_t
+
     def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
-        # I1t_im = self.revtrans(I1t.cpu()[0])
-        I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
-        # I2t_im = self.revtrans(I2t.cpu()[0])
-        I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
-        # I1t_im = I1t_im.resize((512, 512))
-        # I2t_im = I2t_im.resize((512, 512))
+        I1t_im = self.revtrans(I1t.cpu()[0])
+        # I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
+        I2t_im = self.revtrans(I2t.cpu()[0])
+        # I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
+        I1t_im = I1t_im.resize((512, 512))
+        I2t_im = I2t_im.resize((512, 512))
         caption1 = generate_caption(I1t_im, max_words=2, style=style)
         dI1t = self.pipeline(caption1,
                              width=I1t_im.width, height=I1t_im.height,
@@ -215,8 +218,8 @@ class DiffimeInterp(nn.Module):
         dI1t = dI1t.resize(self.config.test_size)
         dI2t = dI2t.resize(self.config.test_size)
 
-
-        path = self.config.store_path + '/' + folder + '/latents'
+        path = generate_folder("latents", self.config.store_path, extension=folder)
+        # path = self.config.store_path + '/' + folder + '/latents'
         if not os.path.exists(path):
             os.makedirs(path)
         I1t_im.save(path + '/I1t.png')
@@ -237,12 +240,10 @@ class DiffimeInterp(nn.Module):
         # extract features
 
         I1o, features1, I2o, features2 = self.extract_features_2_frames(I1, I2)
-        feat11, feat12, feat13 = features1
-        feat21, feat22, feat23 = features2
 
         # calculate motion
-        F12, F12in, F1ts = self.motion_calculation(I1o, I2o, F12i, [feat11, feat12, feat13], t, 0)
-        F21, F21in, F2ts = self.motion_calculation(I2o, I1o, F21i, [feat21, feat22, feat23], t, 1)
+        F12, F12in, F1ts = self.motion_calculation(I1o, I2o, F12i, features1, t, 0)
+        F21, F21in, F2ts = self.motion_calculation(I2o, I1o, F21i, features2, t, 1)
 
         # warping 
         I1t, feat1t, norm1, norm1t = self.warping(F1ts, I1, features1)
@@ -250,13 +251,10 @@ class DiffimeInterp(nn.Module):
 
         # normalize
         # Note: normalize in this way benefit training than the original "linear"
-        self.normalize(I1t, feat1t, norm1, norm1t)
-        self.normalize(I2t, feat2t, norm2, norm2t)
+        I1t, feat1t = self.normalize(I1t, feat1t, norm1, norm1t)
+        I2t, feat2t = self.normalize(I2t, feat2t, norm2, norm2t)
 
-        if folder.startswith("Disney"):
-            style = "Disney"
-        else:
-            style = "Anime"
+        style = extract_style_name(folder)
 
         # diffusion
         if self.config.diff_objective == "latents":

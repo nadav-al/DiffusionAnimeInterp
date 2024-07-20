@@ -2,6 +2,7 @@ import argparse
 import os
 
 import models
+from models.DiffimeInterp import DiffimeInterp
 import datas
 import torch
 import torchvision.transforms as TF
@@ -59,23 +60,27 @@ def validate(config, args):
 
     # prepare model
     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-        model = getattr(models, config.model)(config.pwc_path).to(device)
+        model = getattr(models, config.model)(config.pwc_path, config=config).to(device)
+    elif config.model == "LoraInterp":
+        base_model = DiffimeInterp(config.pwc_path, config=config, args=args).to(device)
+        model = getattr(models, config.model)(base_model)
+
+        if config.multiscene:
+            if os.path.exists(config.lota_weights_path):
+                weights_path = config.lora_weights_path
+            else:
+                weights_path = model.train_lora_multi_scene(config.testset_root)
+
     else:
         model = getattr(models, config.model)(config.pwc_path, config=config, args=args).to(device)
     model = nn.DataParallel(model)
-    retImg = []
 
     # load weights
     dict1 = torch.load(config.checkpoint)
     model.load_state_dict(dict1['model_state_dict'], strict=False)
 
-    # prepare others
-
 
     folders = []
-
-    # for validationIndex, validationData in enumerate(validationloader, 0):
-    #     continue
 
     print('Everything prepared. Ready to test...')
     sys.stdout.flush()
@@ -88,32 +93,34 @@ def validate(config, args):
             print('Testing {}/{}-th group...'.format(validationIndex+1, len(testset)))
             sys.stdout.flush()
             sample, flow, index, folder = validationData
-            if validationIndex == 0:
-                print(folder[0][0])
-                continue
-            # store_path = generate_folder(root_path=config.store_path, unique_folder=False)
+            # if validationIndex == 0:
+            #     print(folder[0][0])
+            #     continue
+
             first_frame = sample[0]
             last_frame = sample[-1]
 
             folders.append(folder[0][0])
 
+            if config.model == "LoraInterp":
+                if not config.multiscene:
+                    if os.path.exists(os.path.join(config.lora_weights_path, folder[0][0])):
+                        weights_path = os.path.join(config.lora_weights_path, folder[0][0])
+                    else:
+                        weights_path = model.train_lora_single_scene(folder[0][0])
+
             # initial SGM flow
             F12i, F21i = flow
-            ITs = [sample[tt] for tt in range(1, 2)]
 
             F12i = F12i.float().to(device)
             F21i = F21i.float().to(device)
             I1 = first_frame.to(device)
             I2 = last_frame.to(device)
 
-            num_of_frames = config.inter_frames
-
-            # if not os.path.exists(config.store_path + '/' + folder[0][0]):
-            #     os.makedirs(config.store_path + '/' + folder[0][0])
             store_path = generate_folder(folder[0][0], config.store_path, unique_folder=(validationIndex == 0))
 
-            # save the first and last frame
-            print(store_path, os.path.exists(store_path))
+            num_of_frames = config.inter_frames
+
             if store_path.endswith(folder[0][0]):
                 revtrans(I1.cpu()[0]).save(store_path + '/frame1.png')
                 revtrans(I2.cpu()[0]).save(store_path + f'/frame{num_of_frames + 2}.png')
@@ -121,14 +128,18 @@ def validate(config, args):
                 revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
                 revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
 
+
             x = num_of_frames
             try:
                 for tt in range(num_of_frames):
                     t = 1.0 / (x + 1) * (tt + 1)
                     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-                        outputs = model(I1, I2, F12i, F21i, t)
-                    elif config.model == 'LoraInterp':
                         outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
+                    elif config.model == 'LoraInterp':
+                        if torch.cuda.is_available():
+                            outputs = model.module(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
+                        else:
+                            outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
                     else:
                         outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
 

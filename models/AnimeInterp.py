@@ -42,7 +42,7 @@ class FeatureExtractor(nn.Module):
 
 class AnimeInterp(nn.Module):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', args=None):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, args=None):
         super(AnimeInterp, self).__init__()
 
         args = argparse.Namespace()
@@ -54,6 +54,17 @@ class AnimeInterp(nn.Module):
         self.feat_ext = FeatureExtractor()
         self.fwarp = ForwardWarp('summation')
         self.synnet = GridNet(6, 64, 128, 96*2, 3)
+
+
+        self.config = config
+        revmean = [-x for x in config.mean]
+        revstd = [1.0 / x for x in config.std]
+        from torchvision import transforms as TF
+        revnormalize1 = TF.Normalize([0.0, 0.0, 0.0], revstd)
+        revnormalize2 = TF.Normalize(revmean, [1.0, 1.0, 1.0])
+        self.revNormalize = TF.Compose([revnormalize1, revnormalize2])
+        self.revtrans = TF.Compose([revnormalize1, revnormalize2, TF.ToPILImage()])
+        self.to_img = TF.ToPILImage()
 
 
         if path is not None:
@@ -69,7 +80,7 @@ class AnimeInterp(nn.Module):
         tmp[:, 1:] = tmp[:, 1:].clone() * tmp.size()[2] / flo.size()[2]
 
         return tmp
-    def forward(self, I1, I2, F12i, F21i, t):
+    def forward(self, I1, I2, F12i, F21i, t, folder=None):
         r = 0.6
 
         # I1 = I1[:, [2, 1, 0]]
@@ -118,6 +129,13 @@ class AnimeInterp(nn.Module):
         feat2t2 = self.fwarp(feat22, F2tdd)
         feat2t3 = self.fwarp(feat23, F2tddd)
 
+        # I1t_im = self.revtrans(I1t[0])
+        # I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
+        # I2t_im = self.revtrans(I2t[0])
+        # I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
+
+
+
         norm1 = self.fwarp(one0, F1t.clone())
         norm1t1 = self.fwarp(one1, F1td.clone())
         norm1t2 = self.fwarp(one2, F1tdd.clone())
@@ -141,6 +159,17 @@ class AnimeInterp(nn.Module):
         
         feat1t3[norm1t3 > 0] = feat1t3.clone()[norm1t3 > 0] / norm1t3[norm1t3 > 0]
         feat2t3[norm2t3 > 0] = feat2t3.clone()[norm2t3 > 0] / norm2t3[norm2t3 > 0]
+
+        I1t_im = self.revtrans(I1t.cpu()[0])
+        I2t_im = self.revtrans(I2t.cpu()[0])
+        I1t_im = I1t_im.resize((1024, 1024))
+        I2t_im = I2t_im.resize((1024, 1024))
+
+        from utils.files_and_folders import generate_folder
+        path = generate_folder("latents", self.config.store_path, extension=folder)
+
+        I1t_im.save(path + '/I1t.png')
+        I2t_im.save(path + '/I2t.png')
 
 
         # synthesis

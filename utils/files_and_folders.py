@@ -42,13 +42,23 @@ def generate_folder(folder_name=None, root_path="checkpoints/outputs/LoRAs", ext
     return full_path
 
 def extract_style_name(file_name):
+    prefix = extract_known_prefix(file_name)
+    if prefix is None:
+        return "Animation"
+    elif prefix == "Japan":
+        return "Anime"
+    return prefix
+
+def extract_known_prefix(file_name):
     if file_name.startswith("Disney"):
         return "Disney"
     elif file_name.startswith("Pixar"):
         return "Pixar"
-    elif file_name.startswith("Japan") or file_name.startswith("Anime"):
+    elif file_name.startswith("Japan"):
+        return "Japan"
+    elif file_name.startswith("Anime"):
         return "Anime"
-    return "Animation"
+    return None
 
 
 def remove_style_name(file_name):

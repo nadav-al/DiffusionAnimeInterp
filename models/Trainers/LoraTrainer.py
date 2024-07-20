@@ -1,7 +1,7 @@
 import os
 import shutil
 import argparse
-from utils.image_processing import preprocess_single_scene
+from utils.image_processing import preprocess_single_scene, preprocess_multiple_scenes
 from utils.files_and_folders import generate_folder
 from utils.captionning import generate_metadata
 
@@ -28,6 +28,12 @@ def parse_args():
         type=int,
         default=1,
         help="The size of the batch size for training",
+    )
+    parser.add_argument(
+        "--rank",
+        type=int,
+        default=6,
+        help="The rank of the LoRA",
     )
 
     args, _ = parser.parse_known_args()
@@ -62,7 +68,43 @@ class LoRATrainer:
 
         # self.methods = [Methods.RANDOM_SIZE, Methods.JITTER_RANDOM]
 
-    def train(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False):
+
+    def train_multi_scene(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False):
+        folder = os.path.split(path)[-1]
+        if apply_preprocess:
+            path = preprocess_multiple_scenes(path, unique_folder=unique_folder)
+            generate_metadata(path)
+        else:
+            store_preprocess = True  # We don't want to erase the original data directory
+
+        output_path = generate_folder(folder, unique_folder=unique_folder)
+
+        os.system(
+            f"accelerate launch {self.multi_gpu} models/Trainers/{self.script_name}.py \
+                              --pretrained_model_name_or_path={self.diff_path} \
+                              --train_data_dir={path} \
+                              --rank={self.args.rank} \
+                              --mixed_precision='fp16' \
+                              --dataloader_num_workers=8 \
+                              --train_batch_size={self.args.train_bs} \
+                              {self.train_text_enc} \
+                              --learning_rate=1e-04 \
+                              --lr_scheduler='cosine' \
+                              --snr_gamma=5 \
+                              --lr_warmup_steps=0 \
+                              --output_dir={output_path} \
+                              --num_train_epochs=100 \
+                              --checkpointing_steps=50 \
+                              --resume_from_checkpoint='latest' \
+                              --scale_lr")
+
+        if not store_preprocess:
+            shutil.rmtree(path)
+
+        return output_path
+
+
+    def train_single_scene(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False):
         folder = os.path.split(path)[-1]
         if apply_preprocess:
             path = preprocess_single_scene(path, unique_folder=unique_folder)
@@ -71,13 +113,12 @@ class LoRATrainer:
             store_preprocess = True  # We don't want to erase the original data directory
 
         output_path = generate_folder(folder, unique_folder=unique_folder)
-        # output_path = os.path.join("checkpoints/outputs/LoRAs/07-17/test6", folder)
-        # print(path)
+
         os.system(
             f"accelerate launch {self.multi_gpu} models/Trainers/{self.script_name}.py \
                       --pretrained_model_name_or_path={self.diff_path} \
                       --train_data_dir={path} \
-                      --rank=6 \
+                      --rank={self.args.rank} \
                       --mixed_precision='fp16' \
                       --dataloader_num_workers=8 \
                       --train_batch_size={self.args.train_bs} \
