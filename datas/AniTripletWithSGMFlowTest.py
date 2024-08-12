@@ -19,8 +19,6 @@ def _make_dataset(dir, dirf):
     framesFolder = []
     # Find and loop over all the clips in root `dir`.
     for index, folder in enumerate(os.listdir(dir)):
-        # if folder == "Japan_v2_2_053853_s3":
-        #     continue
         clipsFolderPath = os.path.join(dir, folder)
         flowFolderPath = os.path.join(dirf, folder)
         # Skip items which are not folders.

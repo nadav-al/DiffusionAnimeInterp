@@ -28,9 +28,11 @@ def add_args(parser, cfg, prefix=''):
 class Config(object):
     @staticmethod
     def from_file(filename):
+
         if filename.endswith('.py'):
             sys.path.append(osp.dirname(filename))
             module_name = osp.basename(filename).rstrip('.py')
+            
             cfg = import_module(module_name)
             config_dict = edict({
                 name: value

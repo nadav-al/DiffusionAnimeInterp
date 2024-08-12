@@ -6,8 +6,8 @@ prefix = 'Datasets_root/'
 
 # prefix = 'D:/University/ForthYear/GuidedProject/other_animations'
 # prefix = ''
-testset_root = prefix + 'other_animations/full_shots/'
-test_flow_root = prefix + 'other_animations/AoT_sgm_flows/'
+testset_root = prefix + 'AoT/full_shots/'
+test_flow_root = prefix + 'AoT/AoT_sgm_flows/'
 
 test_size = (960, 540)
 test_crop_size = (960, 540)

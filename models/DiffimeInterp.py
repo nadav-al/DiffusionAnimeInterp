@@ -101,28 +101,16 @@ class DiffimeInterp(nn.Module):
                 dict2[key[7:]] = dict1[key]
             self.flownet.load_state_dict(dict2, strict=False)
 
-    def load_diffuser(self, type="image", controlnet=None):
+    def load_diffuser(self, type="image"):
         print("loading diffuser")
-        if controlnet is not None:
-            if type == "image":
-                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
-                                                                           controlnet=controlnet,
-                                                                           torch_dtype=torch.bfloat16, variant="fp16",
-                                                                           use_safetensors=True).to("cuda")
-            elif type == "text":
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
-                                                                          controlnet=controlnet,
-                                                                          torch_dtype=torch.bfloat16, variant="fp16",
-                                                                          use_safetensors=True).to("cuda")
-        else:
-            if type == "image":
-                self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
-                                                                           torch_dtype=torch.bfloat16, variant="fp16",
-                                                                           use_safetensors=True).to("cuda")
-            elif type == "text":
-                self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
-                                                                          torch_dtype=torch.bfloat16, variant="fp16",
-                                                                          use_safetensors=True).to("cuda")
+        if type == "image":
+            self.pipeline = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
+                                                                       torch_dtype=torch.float16, variant="fp16",
+                                                                       use_safetensors=True).to("cuda")
+        elif type == "text":
+            self.pipeline = AutoPipelineForText2Image.from_pretrained(self.config.diff_path,
+                                                                      torch_dtype=torch.float16, variant="fp16",
+                                                                      use_safetensors=True).to("cuda")
         print("diffuser loaded")
         self.pipeline.enable_model_cpu_offload()
 
@@ -174,8 +162,6 @@ class DiffimeInterp(nn.Module):
         one2 = torch.ones(feat2.size(), requires_grad=True).cuda()
         one3 = torch.ones(feat3.size(), requires_grad=True).cuda()
 
-        I = I.cuda()
-
 
         It = self.fwarp(I, Ft)
         feat_t1 = self.fwarp(feat1, Ftd)
@@ -197,19 +183,21 @@ class DiffimeInterp(nn.Module):
 
         return It, feat_t
 
+
     def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
         I1t_im = self.revtrans(I1t.cpu()[0])
         # I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
         I2t_im = self.revtrans(I2t.cpu()[0])
         # I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
-        I1t_im = I1t_im.resize((512, 512))
-        I2t_im = I2t_im.resize((512, 512))
+        # I1t_im = I1t_im.resize((1024, 1024))
+        # I2t_im = I2t_im.resize((1024, 1024))
         caption1 = generate_caption(I1t_im, max_words=2, style=style)
+        caption2 = generate_caption(I2t_im, max_words=2, style=style)
         dI1t = self.pipeline(caption1,
                              width=I1t_im.width, height=I1t_im.height,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
                              num_inferece_steps=30, image=I1t_im, strength=0.5).images[0]
-        dI2t = self.pipeline(caption1,
+        dI2t = self.pipeline(caption2,
                              width=I2t_im.width, height=I2t_im.height,
                              negative_prompt="Distorted. Black Spots. Bad Quality. ",
                              num_inferece_steps=30, image=I2t_im, strength=0.5).images[0]
@@ -230,8 +218,11 @@ class DiffimeInterp(nn.Module):
         dI1t = self.trans(dI1t.convert('RGB')).to(self.device).unsqueeze(0)
         dI2t = self.trans(dI2t.convert('RGB')).to(self.device).unsqueeze(0)
         # synthesis
-        return self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
+        It_warp = self.synnet(torch.cat([dI1t, dI2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                               torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
+
+        self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0)).save(path + '/frame2.png')
+        return It_warp
 
 
 
@@ -245,7 +236,7 @@ class DiffimeInterp(nn.Module):
         F12, F12in, F1ts = self.motion_calculation(I1o, I2o, F12i, features1, t, 0)
         F21, F21in, F2ts = self.motion_calculation(I2o, I1o, F21i, features2, t, 1)
 
-        # warping 
+        # warping
         I1t, feat1t, norm1, norm1t = self.warping(F1ts, I1, features1)
         I2t, feat2t, norm2, norm2t = self.warping(F2ts, I2, features2)
 
@@ -268,7 +259,7 @@ class DiffimeInterp(nn.Module):
             It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
             caption = generate_caption(It_warp, max_words=2, style=style)
             It_warp = self.pipeline(caption,
-                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
+                                    negative_prompt="Blur. Blurry. Error. Worst Quality. Distorted. smudges.",
                                     num_inferece_steps=60, image=It_warp).images[0]
             It_warp = It_warp.resize(self.config.test_size)
             It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)

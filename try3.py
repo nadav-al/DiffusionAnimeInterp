@@ -13,9 +13,6 @@ from utils.vis_flow import flow_to_color
 from utils.config import Config
 from utils.image_processing import generate_folder
 
-import numpy as np
-from diffusers import StableDiffusionXLImg2ImgPipeline
-from diffusers.utils import load_image
 
 def save_flow_to_img(flow, des):
     f = flow[0].data.cpu().numpy().transpose([1, 2, 0])
@@ -61,19 +58,21 @@ def validate(config, args):
     # prepare model
     if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
         model = getattr(models, config.model)(config.pwc_path, config=config).to(device)
-    elif config.model == "LoraInterp":
-        base_model = DiffimeInterp(config.pwc_path, config=config, args=args).to(device)
-        model = getattr(models, config.model)(base_model)
-
-        if config.multiscene:
-            if os.path.exists(config.lota_weights_path):
-                weights_path = config.lora_weights_path
-            else:
-                weights_path = model.train_lora_multi_scene(config.testset_root)
-
     else:
         model = getattr(models, config.model)(config.pwc_path, config=config, args=args).to(device)
     model = nn.DataParallel(model)
+
+    if config.model in [ "LoraInterp", "LoraCNInterp" ]:
+        if config.multiscene:
+            if config.do_training:
+                if os.path.exists(config.folders_json):
+                    weights_path = model.module.train_lora_multi_scene(config.folders_json)
+                else:
+                    weights_path = model.module.train_lora_multi_scene(config.testset_root)
+            elif os.path.exists(config.lora_weights_path):
+                weights_path = config.lora_weights_path
+            else:
+                raise NotImplementedError()
 
     # load weights
     dict1 = torch.load(config.checkpoint)
@@ -93,9 +92,6 @@ def validate(config, args):
             print('Testing {}/{}-th group...'.format(validationIndex+1, len(testset)))
             sys.stdout.flush()
             sample, flow, index, folder = validationData
-            # if validationIndex == 0:
-            #     print(folder[0][0])
-            #     continue
 
             first_frame = sample[0]
             last_frame = sample[-1]
@@ -104,10 +100,13 @@ def validate(config, args):
 
             if config.model == "LoraInterp":
                 if not config.multiscene:
+                    if config.do_training:
+                        weights_path = model.module.train_lora_single_scene(folder[0][0])
                     if os.path.exists(os.path.join(config.lora_weights_path, folder[0][0])):
+                        print("weights path exists for ", folder[0][0], ".")
                         weights_path = os.path.join(config.lora_weights_path, folder[0][0])
                     else:
-                        weights_path = model.train_lora_single_scene(folder[0][0])
+                        raise NotImplementedError()
 
             # initial SGM flow
             F12i, F21i = flow
@@ -128,39 +127,35 @@ def validate(config, args):
                 revtrans(I1.cpu()[0]).save(store_path + '/' + folder[0][0] + '/frame1.png')
                 revtrans(I2.cpu()[0]).save(store_path + '/' + folder[-1][0] + f'/frame{num_of_frames + 2}.png')
 
-
             x = num_of_frames
-            try:
-                for tt in range(num_of_frames):
-                    t = 1.0 / (x + 1) * (tt + 1)
-                    if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
-                        outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
-                    elif config.model == 'LoraInterp':
-                        if torch.cuda.is_available():
-                            outputs = model.module(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
-                        else:
-                            outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
+            for tt in range(num_of_frames):
+                t = 1.0 / (x + 1) * (tt + 1)
+                if config.model in [ 'AnimeInterp', 'AnimeInterpNoCupy' ]:
+                    outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
+                elif config.model in [ 'LoraInterp', 'LoraCNInterp' ]:
+                    if torch.cuda.is_available():
+                        outputs = model.module(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
                     else:
-                        outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
+                        outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0], weights_path=weights_path)
+                else:
+                    outputs = model(I1, I2, F12i, F21i, t, folder=folder[0][0])
 
-                    if outputs is None:
-                        continue
+                if outputs is None:
+                    continue
 
-                    It_warp = outputs[0]
+                It_warp = outputs[0]
 
-                    warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-                    if store_path.endswith(f'/{folder[1][0]}'):
-                        warp_img.save(store_path + f'/frame{tt+2}.png')
-                        if tt == 0:
-                            save_flow_to_img(outputs[1].cpu(), store_path + '/flows/F12')
-                            save_flow_to_img(outputs[2].cpu(), store_path + '/flows/F21')
-                    else:
-                        warp_img.save(store_path + '/' + folder[1][0] + f'/frame{tt+2}.png')
-                        if tt == 0:
-                            save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/flows/F12')
-                            save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/flows/F21')
-            except Exception as e:
-                print(e)
+                warp_img = to_img(revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+                if store_path.endswith(f'/{folder[1][0]}'):
+                    warp_img.save(store_path + f'/frame{tt+2}.png')
+                    if tt == 0:
+                        save_flow_to_img(outputs[1].cpu(), store_path + '/flows/F12')
+                        save_flow_to_img(outputs[2].cpu(), store_path + '/flows/F21')
+                else:
+                    warp_img.save(store_path + '/' + folder[1][0] + f'/frame{tt+2}.png')
+                    if tt == 0:
+                        save_flow_to_img(outputs[1].cpu(), store_path + '/' + folder[1][0] + '/flows/F12')
+                        save_flow_to_img(outputs[2].cpu(), store_path + '/' + folder[1][0] + '/flows/F21')
 
 if __name__ == "__main__":
 

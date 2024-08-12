@@ -7,7 +7,7 @@ import torch
 diff_path = "checkpoints/diffusers/stabilityai/stable-diffusion-xl-base-1.0"
 # diff_path = "checkpoints/diffusers/cagliostrolab/animagine-xl-3.1"
 # diff_path = "checkpoints/diffusers/runwayml/stable-diffusion-v1-5"
-lora_path = "checkpoints/outputs/LoRAs/07-17/test6"
+lora_path = "checkpoints/outputs/LoRAs/08-10/test2/rank8"
 weight_name = "pytorch_lora_weights.safetensors"
 
 output_path = "outputs/weights_tests/07-17/sdxl/test2"
