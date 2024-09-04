@@ -5,8 +5,8 @@ import cv2
 from PIL import Image
 from .files_and_folders import generate_folder, remove_style_name, read_folders_from_json
 
-sizes = [0.4, 0.55, 0.6, 0.65, 0.72, 0.78, 0.85, 0.9, 0.95, 1]
-repeats = [1, 2, 2, 3, 2, 3, 2, 2, 1, 0]
+sizes = [0.7, 0.73, 0.77, 0.85, 0.9, 0.95]
+repeats = [2, 2, 3, 3, 2, 3]
 
 calculate_sizes = [
     lambda img, size: (img.width * size, img.height * size),
@@ -22,38 +22,24 @@ def generate_crops(image_path, image_name, output_folder, prefix=""):
     image_name = prefix + image_name
     with Image.open(image_path) as img:
         img = img.resize((960,540))
-        total_crops = [(image_name, img), (image_name, img)]
-        for threshold in range(7, 4, -1):
-            crops = []
-            for j in range(len(sizes)):
-                rand_idx = random.randint(0, int(N-1))
-                w_size, h_size = calculate_sizes[rand_idx](img, sizes[j])
-                for i in range(repeats[j]):
-                    l1 = random.randint(0, int(img.width - w_size))
-                    # l2 = random.randint(0, img.width - g_size)
-                    # left = (0 + l1 + l2) // 3
-                    t1 = random.randint(0, int(img.height - h_size))
-                    # t2 = random.randint(0, img.height - g_size)
-                    # t3 = random.randint(0, img.height - g_size)
-                    # top = (t1 + t2 + t3) // 3
-                    # cropped = img.crop((left, top, left + g_size, top + g_size))
-                    cropped = img.crop((l1, t1, l1 + w_size, t1 + h_size))
-                    crops.append((image_name, cropped))
-            total_crops += crops
-        # for i, crop in enumerate(total_crops):
-        #     output_path = os.path.join(output_folder,
-        #                                f"{image_name}_crop{i + 1}.png")
-        #
-        #     crop.save(output_path)
-        # img.save(os.path.join(output_folder, f"{image_name}_1.png"))
-        # img.save(os.path.join(output_folder, f"{image_name}_2.png"))
+        total_crops = [(image_name, img)]
+        crops = []
+        for j in range(len(sizes)):
+            rand_idx = random.randint(0, int(N-1))
+            w_size, h_size = calculate_sizes[rand_idx](img, sizes[j])
+            for i in range(repeats[j]):
+                l1 = random.randint(0, int(img.width - w_size))
+                t1 = random.randint(0, int(img.height - h_size))
+                cropped = img.crop((l1, t1, l1 + w_size, t1 + h_size))
+                crops.append((image_name, cropped))
+        total_crops += crops
 
     return total_crops
 
 
-def preprocess_single_scene(root, output_folder="", max_crops=3000, unique_folder=False, prefix="", only_2_frames=True):
+def preprocess_single_scene(root, folder_base, test_details,  folder_name=None, output_folder="", max_crops=3000, unique_folder=False, prefix="", only_2_frames=True):
     if output_folder == "":
-        output_folder = generate_folder(os.path.split(root)[1], "TempDatasets", unique_folder=unique_folder)
+        output_folder = generate_folder(folder_name, folder_base=folder_base, root_path="TempDatasets", test_details=test_details, unique_folder=unique_folder)
     if prefix != "":
         prefix += '_'
     image_files = os.listdir(root)
@@ -66,7 +52,7 @@ def preprocess_single_scene(root, output_folder="", max_crops=3000, unique_folde
         if not image_name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
             continue
         idx += 1
-        if only_2_frames and (idx == 1 or idx >= 3):
+        if only_2_frames and "frame2" in image_name:
             continue
         image_path = os.path.join(root, image_name)
         total_crops += generate_crops(image_path, os.path.splitext(image_name)[0], output_folder, prefix=prefix)
@@ -80,15 +66,15 @@ def preprocess_single_scene(root, output_folder="", max_crops=3000, unique_folde
         image.save(os.path.join(output_folder, f"{name}_crop{i + 1}.png"))
     return output_folder
 
-def preprocess_multiple_scenes(root, output_folder="", max_crops=3000, unique_folder=False, prefix="", only_2_frames=True):
+def preprocess_multiple_scenes(root, folder_base, test_details, output_folder="", max_crops=3000, unique_folder=False, prefix="", only_2_frames=True):
     if os.path.isfile(root):
         return preprocess_multiple_scenes_json(root, output_folder, unique_folder, prefix, only_2_frames)
     
     folders = os.listdir(root)
     if output_folder == "":
-        output_folder = generate_folder(os.path.split(root)[1], "TempDatasets", unique_folder=unique_folder)
-    else:
-        raise ValueError("Can't find this folder")
+        output_folder = generate_folder(folder_base=folder_base, root_path="TempDatasets", test_details=test_details, unique_folder=unique_folder)
+    # else:
+    #     raise ValueError("Can't find this folder")
 
     if prefix != "":
         prefix += '_'
@@ -96,9 +82,10 @@ def preprocess_multiple_scenes(root, output_folder="", max_crops=3000, unique_fo
     total_crops = []
     for f in folders:
         folder_path = os.path.join(root, f)
-        rsn = remove_style_name(f)
+        # rsn = remove_style_name(f)
+        rsn = f
         p = prefix + rsn
-        total_crops += preprocess_single_scene(folder_path, output_folder, max_crops=None, prefix=p, only_2_frames=only_2_frames)
+        total_crops += preprocess_single_scene(folder_path, folder_base=folder_base, test_details=test_details, output_folder=output_folder, max_crops=None, prefix=p, only_2_frames=only_2_frames)
 
     if len(total_crops) > max_crops:
         total_crops = random.sample(total_crops, max_crops)
@@ -114,8 +101,8 @@ def preprocess_multiple_scenes_json(json_file, output_folder="", unique_folder=F
         x = os.path.splitext(os.path.split(json_file)[1])[0]
         output_folder = generate_folder(x, "TempDatasets", unique_folder=unique_folder)
 
-    else:
-        raise ValueError("Can't find this folder")
+    # else:
+    #     raise ValueError("Can't find this folder")
     
     if prefix != "":
         prefix += '_'

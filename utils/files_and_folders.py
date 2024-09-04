@@ -4,14 +4,14 @@ import json
 from PIL import Image
 
 
-def get_next_test_number(root_path, current_date):
-    test_dir = os.path.join(root_path, current_date)
+def get_next_test_number(root_path, folder_base):
+    test_dir = os.path.join(root_path, folder_base)
     if not os.path.exists(test_dir):
         return 1
 
     # existing_tests = [d for d in os.listdir(test_dir) if
     #                   d.startswith("test") and os.path.isdir(os.path.join(test_dir, d))]
-    existing_tests = [d for d in os.listdir(test_dir) if
+    existing_tests = [d.split("_")[0] for d in os.listdir(test_dir) if
                       d.startswith("test")]
     if not existing_tests:
         return 1
@@ -19,28 +19,41 @@ def get_next_test_number(root_path, current_date):
     max_test_num = max(int(d[4:]) for d in existing_tests)
     return max_test_num + 1
 
-def generate_folder(folder_name=None, root_path="checkpoints/outputs/LoRAs", extension=None, unique_folder=False):
+def extract_string_from_dict(dictionary):
+    details = []
+    for key, value in dictionary.items():
+        if type(value) is bool and value:
+            details.append(key)
+        elif type(value) is int and value > 1:
+            details.append(f"{key}{value}")
+    return "_".join(details)
+
+def generate_folder(folder_name=None, folder_base=None, root_path="experiments/checkpoints", test_details=None, unique_folder=False, create=True):
     # Get current date in mm-dd format
-    current_date = datetime.now().strftime("%m-%d")
+    if folder_base is None:
+        folder_base = datetime.now().strftime("%m-%d")
     # Get the next test number
-    test_num = get_next_test_number(root_path, current_date)
+    test_num = get_next_test_number(root_path, folder_base)
     if not unique_folder and test_num > 1:
         test_num -= 1
 
     # Create the full path
     # full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
+    test_str = ""
+    if test_details:
+        if type(test_details) is str:
+            test_str = test_details
+        else:
+            test_str = f"test{test_num}_{extract_string_from_dict(test_details)}"
     if folder_name is not None:
-        if extension:
-            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension, folder_name)
-        else:
-            full_path = os.path.join(root_path, current_date, f"test{test_num}", folder_name)
+        full_path = os.path.join(root_path, folder_base, test_str, folder_name)
     else:
-        if extension:
-            full_path = os.path.join(root_path, current_date, f"test{test_num}", extension)
-        else:
-            full_path = os.path.join(root_path, current_date, f"test{test_num}")
+        full_path = os.path.join(root_path, folder_base, test_str)
+
+    full_path = os.path.normpath(full_path)
     # Create the directory
-    os.makedirs(full_path, exist_ok=True)
+    if not os.path.exists(full_path):
+        os.makedirs(full_path, exist_ok=True)
 
     print(f"Folder created: {full_path}")
     return full_path
@@ -114,6 +127,7 @@ def extract_style_name(file_name):
     return prefix
 
 def extract_known_prefix(file_name):
+
     if file_name.startswith("Disney"):
         return "Disney"
     elif file_name.startswith("Pixar"):
@@ -133,10 +147,14 @@ def remove_style_name(file_name):
         return file_name.replace("Japan_", "")
     return file_name
 
-def repeat_data(path, repeats, unique_folder=False):
-    output_folder = generate_folder(os.path.split(path)[1], "TempDatasets", unique_folder=unique_folder)
-    for file in os.listdir(path):
+def repeat_data(path, repeats : int, folder_base, test_details, folder_name=None, output_folder=None, unique_folder=False):
+    out_path = output_folder
+    if output_folder is None:
+        # TODO handel generate_folder
+        out_path = generate_folder(folder_name=folder_name, folder_base=folder_base, test_details=test_details, root_path="TempDatasets", unique_folder=unique_folder)
+    files = os.listdir(path)
+    for file in files:
         with Image.open(os.path.join(path, file)) as img:
             for r in range(repeats):
-                img.save(os.path.join(output_folder, f'{r+1 }_{file}'))
-    return output_folder
+                img.save(os.path.join(out_path, f'{r+1}_{file}'))
+    return out_path

@@ -76,23 +76,38 @@ class LoRATrainer:
         # self.methods = [Methods.RANDOM_SIZE, Methods.JITTER_RANDOM]
 
 
-    def train_multi_scene(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False, only_2_frames=True):
-        folder = os.path.split(path)[-1]
-        if apply_preprocess:
-            path = preprocess_multiple_scenes(path, unique_folder=unique_folder, only_2_frames=only_2_frames)
-            generate_metadata(path)
-        elif self.args.data_repeats > 1:
-            path = repeat_data(path, self.args.data_repeats, unique_folder=unique_folder)
-            generate_metadata(path)
+    def train_multi_scene(self, data_path, folder_base, test_details, folder_name=None, weights_path=None, apply_preprocess=True, store_preprocess=True, unique_folder=False, only_2_frames=True, with_caption=True):
+        flag = False
+        if weights_path is not None:
+            folders = weights_path.split('/')
+            if folders[-1].startswith("test"):
+                data_path = generate_folder(None, folder_base=folder_base, root_path="TempDatasets", test_details=test_details, unique_folder=False)
+            else:
+                data_path = generate_folder(folders[-1], folder_base=folder_base, root_path="TempDatasets", test_details=folders[-2], unique_folder=False)
+        else:
+            if apply_preprocess:
+                flag=True
+                data_path = preprocess_multiple_scenes(data_path, folder_base=folder_base, test_details=test_details, unique_folder=unique_folder, only_2_frames=only_2_frames)
+            if self.args.data_repeats > 1:
+                if flag:
+                    data_path = repeat_data(data_path, self.args.data_repeats, folder_name=folder_name, folder_base=folder_base, test_details=test_details, output_folder=data_path, unique_folder=unique_folder)
+                else:
+                    data_path = repeat_data(data_path, self.args.data_repeats, folder_name=folder_name, folder_base=folder_base,
+                                            test_details=test_details, unique_folder=unique_folder)
+                    flag=True
+
+        if flag:
+            generate_metadata(data_path, with_caption=with_caption)
         else:
             store_preprocess = True  # We don't want to erase the original data directory
+        if weights_path is None:
+            weights_path = generate_folder(folder_name=folder_name, folder_base=folder_base, test_details=test_details, unique_folder=unique_folder)
 
-        output_path = generate_folder(folder, extension=f"rank{self.args.rank}", unique_folder=unique_folder)
-        width, height = self.config.test_size
         os.system(
-            f"accelerate launch {self.multi_gpu} models/Trainers/{self.script_name}.py \
+            f"accelerate launch {self.multi_gpu} \
+                    models/Trainers/{self.script_name}.py \
                               --pretrained_model_name_or_path={self.diff_path} \
-                              --train_data_dir={path} \
+                              --train_data_dir={data_path} \
                               --gradient_accumulation_steps=1 \
                               --rank={self.args.rank} \
                               --local_rank=-1 \
@@ -104,9 +119,9 @@ class LoRATrainer:
                               --lr_scheduler='cosine_with_restarts' \
                               --snr_gamma=5 \
                               --lr_warmup_steps=0 \
-                              --output_dir={output_path} \
+                              --output_dir={weights_path} \
                               --max_train_steps=4000 \
-                              --checkpointing_steps=150 \
+                              --checkpointing_steps=50 \
                               --resume_from_checkpoint='latest'")
 
         # Added gradient_accumulation_steps
@@ -120,31 +135,51 @@ class LoRATrainer:
 
 
         if not store_preprocess:
-            shutil.rmtree(path)
+            shutil.rmtree(data_path)
 
-        return output_path
+        return weights_path
 
 
-    def train_single_scene(self, path, apply_preprocess=True, store_preprocess=True, unique_folder=False, only_2_frames=True):
-        folder = os.path.split(path)[-1]
-        if folder in [ 'lora', 'frames' ]:
-            folder = os.path.split(os.path.split(path)[0])[-1]
+    def train_single_scene(self, data_path, folder_name=None, folder_base=None, test_details=None, weights_path=None, apply_preprocess=True, store_preprocess=True, unique_folder=False, only_2_frames=True, with_caption=True):
+        flag = False
+        data_repeats = self.args.data_repeats
+        if weights_path is not None:
+            folders = weights_path.split('/')
+            if folders[-1].startswith("test"):
+                path = generate_folder(folder_name, folder_base=folder_base, root_path="TempDatasets", test_details=test_details, unique_folder=False, create=False)
+                if folder_name is not None:
+                    weights_path = os.path.join(weights_path, folder_name)
+            else:
+                path = generate_folder(folders[-1], folder_base=folder_base, root_path="TempDatasets", test_details=folders[-2], unique_folder=False, create=False)
+
+            if os.path.exists(path) and len(os.listdir(path)) > 0:
+                data_path = path
+                apply_preprocess = False
+                data_repeats = 0
+
+        else:
+            weights_path = generate_folder(folder_name=folder_name, folder_base=folder_base,
+                                           test_details=test_details, unique_folder=unique_folder)
         if apply_preprocess:
-            path = preprocess_single_scene(path, unique_folder=unique_folder, only_2_frames=only_2_frames)
-            generate_metadata(path)
-        elif self.args.data_repeats > 1:
-            path = repeat_data(path, self.args.data_repeats, unique_folder=unique_folder)
-            generate_metadata(path)
+            flag = True
+            data_path = preprocess_single_scene(data_path, folder_name=folder_name, folder_base=folder_base, test_details=test_details,
+                                                unique_folder=unique_folder, only_2_frames=only_2_frames)
+        if data_repeats > 1:
+            flag = True
+            data_path = repeat_data(data_path, data_repeats, folder_name=folder_name, folder_base=folder_base, test_details=test_details,
+                                    unique_folder=unique_folder)
+        if flag:
+            generate_metadata(data_path, with_caption=with_caption)
         else:
             store_preprocess = True  # We don't want to erase the original data directory
 
-        output_path = generate_folder(folder, extension=f"rank{self.args.rank}", unique_folder=unique_folder)
-        width, height = self.config.test_size
-        print("data_path for lora is: ", path)
+
+        print("data_path for lora is: ", data_path)
         os.system(
-            f"accelerate launch {self.multi_gpu} models/Trainers/{self.script_name}.py \
+            f"accelerate launch {self.multi_gpu} \
+                models/Trainers/{self.script_name}.py \
                       --pretrained_model_name_or_path={self.diff_path} \
-                      --train_data_dir={path} \
+                      --train_data_dir={data_path} \
                       --gradient_accumulation_steps=1 \
                       --rank={self.args.rank} \
                       --local_rank=-1 \
@@ -156,55 +191,16 @@ class LoRATrainer:
                       --lr_scheduler='cosine_with_restarts' \
                       --snr_gamma=5 \
                       --lr_warmup_steps=0 \
-                      --output_dir={output_path} \
+                      --output_dir={weights_path} \
                       --max_train_steps=4000 \
-                      --checkpointing_steps=150 \
+                      --checkpointing_steps=50 \
                       --resume_from_checkpoint='latest'")
 
+
         if not store_preprocess:
-            shutil.rmtree(path)
+            shutil.rmtree(data_path)
 
-        return output_path
-
-
-if __name__ == '__main__':
-    print("Started")
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config',
-                        type=str,
-                        required=True)
-    parser.add_argument("--lora_data_path",
-                        type=str,
-                        required=True)
-    parser.add_argument('--multiscene',
-                        action="store_true",)
-    parser.add_argument(
-        "-p",
-        action="store_true",
-        help="Apply preprocess on the data"
-    )
-
-    args, _ = parser.parse_known_args()
-    config = Config.from_file(args.config)
-
-    trainer = LoRATrainer(config)
-    print("Trainer constructed")
-    if args.multiscene:
-        output_path = trainer.train_multi_scene(args.lora_data_path, args.p, unique_folder=True)
-        print(output_path)
-    else:
-        i = 0
-        for folder_name in os.listdir(args.lora_data_path):
-            folder = os.path.join(args.lora_data_path, folder_name)
-            if not os.isdir(folder):
-                continue
-            if i == 0:
-                output_path = trainer.train_single_scene(folder, args.p, unique_folder=True)
-            else:
-                output_path = trainer.train_single_scene(folder, args.p)
-
-            print(output_path)
-            i += 1
+        return weights_path
 
 
 

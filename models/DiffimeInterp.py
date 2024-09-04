@@ -11,7 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 
-from utils.captionning import generate_caption
+from utils.captionning import generate_caption, generate_keywords
 from utils.files_and_folders import extract_style_name, generate_folder
 
 from diffusers import ControlNetModel, AutoPipelineForText2Image, AutoPipelineForImage2Image
@@ -46,6 +46,7 @@ class FeatureExtractor(nn.Module):
 
         return x1, x2, x3
 
+NIS = 60
 
 class DiffimeInterp(nn.Module):
     """The quadratic model"""
@@ -56,6 +57,7 @@ class DiffimeInterp(nn.Module):
         args.small = False
         args.mixed_precision = False
         # args.requires_sq_flow = False
+
 
         self.flownet = RFR(args)
         self.feat_ext = FeatureExtractor()
@@ -184,30 +186,32 @@ class DiffimeInterp(nn.Module):
         return It, feat_t
 
 
-    def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style):
+    def diffuse_latents(self, I1t, I2t, feat1t, feat2t, folder, style, test_details):
         I1t_im = self.revtrans(I1t.cpu()[0])
-        # I1t_im = self.to_img(self.revNormalize(I1t.cpu()[0]).clamp(0.0, 1.0))
         I2t_im = self.revtrans(I2t.cpu()[0])
-        # I2t_im = self.to_img(self.revNormalize(I2t.cpu()[0]).clamp(0.0, 1.0))
-        # I1t_im = I1t_im.resize((1024, 1024))
-        # I2t_im = I2t_im.resize((1024, 1024))
-        caption1 = generate_caption(I1t_im, max_words=2, style=style)
-        caption2 = generate_caption(I2t_im, max_words=2, style=style)
+        if test_details != "" and "cap" in test_details.split('_'):
+            caption1 = generate_caption(I1t_im, max_words=2, style=style)
+            caption2 = generate_caption(I2t_im, max_words=2, style=style)
+        else:
+            caption1 = generate_keywords(style, max_words=4)
+            caption2 = generate_keywords(style, max_words=4)
+
+        negative_prompt = "artifacts. bad quality. worst quality. distorted edges. pixelation. inconsistent colors. worst quality. indistinct facial features. visual noise. unintended texture. unwanted overlay. unnatural shadows. low-resolution. unnatural outlines. corrupted image. jagged lines. unbalanced sharpness. glitchy appearance"
         dI1t = self.pipeline(caption1,
                              width=I1t_im.width, height=I1t_im.height,
-                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I1t_im, strength=0.5).images[0]
+                             negative_prompt=negative_prompt,
+                             num_inference_steps=NIS, image=I1t_im, strength=0.33).images[0]
         dI2t = self.pipeline(caption2,
                              width=I2t_im.width, height=I2t_im.height,
-                             negative_prompt="Distorted. Black Spots. Bad Quality. ",
-                             num_inferece_steps=30, image=I2t_im, strength=0.5).images[0]
+                             negative_prompt=negative_prompt,
+                             num_inference_steps=NIS, image=I2t_im, strength=0.33).images[0]
 
         # resize
         dI1t = dI1t.resize(self.config.test_size)
         dI2t = dI2t.resize(self.config.test_size)
 
-        path = generate_folder("latents", self.config.store_path, extension=folder)
-        # path = self.config.store_path + '/' + folder + '/latents'
+        path = generate_folder("latents", folder_base=test_details, root_path=self.config.store_path, test_details=folder)
+
         if not os.path.exists(path):
             os.makedirs(path)
         I1t_im.save(path + '/I1t.png')
@@ -227,7 +231,7 @@ class DiffimeInterp(nn.Module):
 
 
 
-    def forward(self, I1, I2, F12i, F21i, t, folder=None):
+    def forward(self, I1, I2, F12i, F21i, t, folder=None, test_details=""):
         # extract features
 
         I1o, features1, I2o, features2 = self.extract_features_2_frames(I1, I2)
@@ -249,29 +253,40 @@ class DiffimeInterp(nn.Module):
 
         # diffusion
         if self.config.diff_objective == "latents":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style, test_details)
 
-        elif self.config.diff_objective == "result":
+        elif self.config.diff_objective == "result" or self.config.diff_objective == "results":
             # synthesis
             It_warp = self.synnet(torch.cat([I1t, I2t], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                                   torch.cat([feat1t[1], feat2t[1]], dim=1),
                                   torch.cat([feat1t[2], feat2t[2]], dim=1))
+            output_path = generate_folder(folder, folder_base="", root_path=self.config.store_path,
+                                   test_details=test_details)
             It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
-            caption = generate_caption(It_warp, max_words=2, style=style)
+            It_warp.save(os.path.join(output_path, "AniInterp_frame2.png"))
+            if test_details != "" and "cap" in test_details.split('_'):
+                caption = generate_caption(It_warp, max_words=2, style=style)
+            else:
+                caption = generate_keywords(style, max_words=4)
             It_warp = self.pipeline(caption,
-                                    negative_prompt="Blur. Blurry. Error. Worst Quality. Distorted. smudges.",
-                                    num_inferece_steps=60, image=It_warp).images[0]
+                                    negative_prompt="worst quality. blurry. indistinct facial features. motion blur. faded colors. abstract. unclear background. washed out. distorted.",
+                                    num_inference_steps=NIS, image=It_warp, strength=0.35).images[0]
             It_warp = It_warp.resize(self.config.test_size)
             It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 
         elif self.config.diff_objective == "both":
-            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style)
+            It_warp = self.diffuse_latents(I1t, I2t, feat1t, feat2t, folder, style, test_details)
             It_warp = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
             # It_warp = It_warp.resize((512,512))
-            caption = generate_caption(It_warp, max_words=2, style=style)
+
+            if test_details != "" and "cap" in test_details.split('_'):
+                caption = generate_caption(It_warp, max_words=2, style=style)
+            else:
+                caption = generate_keywords(style, max_words=4)
+
             It_warp = self.pipeline(caption,
-                                    negative_prompt="Blur. Bad Quality. Distorted. smudges.",
-                                    num_inferece_steps=60, image=It_warp).images[0]
+                                    negative_prompt="worst quality. blurry. indistinct facial features. motion blur. faded colors. abstract. unclear background. washed out. distorted.",
+                                    num_inference_steps=NIS, image=It_warp, strength=0.3).images[0]
             It_warp = It_warp.resize(self.config.test_size)
             It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
 

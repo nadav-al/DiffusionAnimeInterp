@@ -72,6 +72,7 @@ def generate_caption(image, style="Animation", min_words=1, max_words=len(KEYWOR
 def generate_metadata(directory, with_caption=True):
     output_file = os.path.join(directory, "metadata.jsonl")
     style = extract_style_name(directory)
+    print(directory, style)
     with open(output_file, 'w') as f:
         for filename in os.listdir(directory):
             if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):

@@ -11,7 +11,7 @@ from .rfr_model.rfr_new import RFR as RFR
 from .softsplat import ModuleSoftsplat as ForwardWarp
 from .GridNet import GridNet
 from .DiffimeInterp import DiffimeInterp
-from utils.captionning import generate_caption
+from utils.captionning import generate_caption, generate_keywords
 from utils.files_and_folders import extract_style_name, generate_folder
 
 from transformers import CLIPVisionModelWithProjection
@@ -65,15 +65,30 @@ def _process_single_image(image_tensor, canny_th_low=100, canny_th_high=200):
 
     return cv2.Canny(np_grayscale, canny_th_low, canny_th_high)
 
+def create_canny(original_image, canny_th_low, canny_th_high):
+    image = np.array(original_image)
+    image = cv2.Canny(image, canny_th_low, canny_th_high)
+    image = image[:, :, None]
+    image = np.concatenate([image, image, image], axis=2)
+    canny_image = Image.fromarray(image)
+    return canny_image
+
+
+NIS = 50  # num_inference_steps
+
 
 class CannyDiffimeInterp(DiffimeInterp):
     """The quadratic model"""
-    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, args=None, canny_th_low=50, canny_th_high=100):
+    def __init__(self, path='models/raft_model/models/rfr_sintel_latest.pth-no-zip', config=None, args=None, canny_th_low=50, canny_th_high=150):
         super(CannyDiffimeInterp, self).__init__(path, config, False, args)
         self.cth_low = canny_th_low
         self.cth_high = canny_th_high
 
         self.load_diffuser()
+        if config.diff_objective == "both":
+            self.pipeline2 = AutoPipelineForImage2Image.from_pretrained(self.config.diff_path,
+                                                                        torch_dtype=torch.float16, variant="fp16",
+                                                                        use_safetensors=True).to("cuda")
 
     def set_low_threshold(self, value):
         self.cth_low = value
@@ -103,8 +118,8 @@ class CannyDiffimeInterp(DiffimeInterp):
         self.pipeline.enable_model_cpu_offload()
 
 
-    def forward(self, I1, I2, F12i, F21i, t, folder=None):
-        store_latents_path = generate_folder("latents", self.config.store_path, extension=folder)
+    def forward(self, I1, I2, F12i, F21i, t, folder=None, test_details=""):
+        store_latents_path = generate_folder("latents", folder_base=test_details, root_path=self.config.store_path, test_details=folder)
         # if not os.path.exists(store_latents_path):
         #     os.makedirs(store_latents_path)
 
@@ -117,10 +132,19 @@ class CannyDiffimeInterp(DiffimeInterp):
         F21, F21in, F2t = self.motion_calculation(I2o, I1o, F21i, features2, t, 1)
         # breakpoint()
 
+        folder_path = os.path.join(self.config.testset_root, folder)
+        folder_path = os.path.normpath(folder_path)
+        images_path = os.listdir(folder_path)
+        style = extract_style_name(folder)
+
+        im1 = Image.open(os.path.join(folder_path, images_path[0])).resize(self.config.test_size)
+        im2 = Image.open(os.path.join(folder_path, images_path[-1])).resize(self.config.test_size)
 
         # canny edge
-        I1c = _tensor_to_canny(I1, self.cth_low, self.cth_high)
-        I2c = _tensor_to_canny(I2, self.cth_low, self.cth_high)
+        I1c = create_canny(im1, self.cth_low, self.cth_high)
+        I1c = self.trans(I1c.convert('RGB')).to(self.device).unsqueeze(0)
+        I2c = create_canny(im2, self.cth_low, self.cth_high)
+        I2c = self.trans(I2c.convert('RGB')).to(self.device).unsqueeze(0)
 
         # warping
         w_I1c, feat1t, norm1, norm1t = self.warping(F1t, I1c, features1)
@@ -136,17 +160,28 @@ class CannyDiffimeInterp(DiffimeInterp):
         # breakpoint()
         print("canny created")
 
-        folder_path = os.path.join(self.config.testset_root, folder)
-        folder_path = os.path.normpath(folder_path)
-        images_path = os.listdir(folder_path)
-        im1 = Image.open(os.path.join(folder_path,images_path[0]))
-        im2 = Image.open(os.path.join(folder_path,images_path[2]))
 
-        caption1 = generate_caption(im1, min_words=2, max_words=4, style=extract_style_name(folder))
-        caption2 = generate_caption(im2, min_words=2, max_words=4, style=extract_style_name(folder))
-        d_I1c = self.pipeline(caption1, image=im1, control_image=w_I1c_img).images[0].resize(self.config.test_size)
-        d_I2c = self.pipeline(caption2, image=im2, control_image=w_I2c_img).images[0].resize(self.config.test_size)
-        # self.pipeline.unload_lora_weights()
+        if test_details != "" and "cap" in test_details.split('_'):
+            caption1 = generate_caption(im1, max_words=2, style=style)
+            caption2 = generate_caption(im2, max_words=2, style=style)
+        else:
+            caption1 = generate_keywords(style, max_words=4)
+            caption2 = generate_keywords(style, max_words=4)
+
+        width, height = self.config.test_size
+
+        d_I1c = self.pipeline(caption1,
+                              negative_prompt="worst quality. blurry. indistinct facial features. motion blur. faded colors. abstract. unclear background. washed out. distorted.",
+                              width=width, height=height,
+                              image=im1, control_image=w_I1c_img,
+                              num_inference_steps=NIS, strength=0.45
+                              ).images[0].resize(self.config.test_size)
+        d_I2c = self.pipeline(caption2,
+                              negative_prompt="worst quality. blurry. indistinct facial features. motion blur. faded colors. abstract. unclear background. washed out. distorted.",
+                              width=width, height=height,
+                              image=im2, control_image=w_I2c_img,
+                              num_inference_steps=NIS, strength=0.45
+                              ).images[0].resize(self.config.test_size)
         print("diffused")
 
         print(store_latents_path)
@@ -159,11 +194,27 @@ class CannyDiffimeInterp(DiffimeInterp):
 
         # d_I1c, feat1t = self.normalize(d_I1c, feat1t, norm1, norm1t)
         # d_I2c, feat2t = self.normalize(d_I2c, feat2t, norm2, norm2t)
-        
+
         # synthesis
         It_warp = self.synnet(torch.cat([d_I1c, d_I2c], dim=1), torch.cat([feat1t[0], feat2t[0]], dim=1),
                               torch.cat([feat1t[1], feat2t[1]], dim=1), torch.cat([feat1t[2], feat2t[2]], dim=1))
 
+        if self.config.diff_objective == "both":
+            output_path = generate_folder(folder, folder_base="", root_path=self.config.store_path,
+                                          test_details=test_details)
+            warp_img = self.to_img(self.revNormalize(It_warp.cpu()[0]).clamp(0.0, 1.0))
+            warp_img.save(os.path.join(output_path, "AniInterp_frame2.png"))
+            if test_details != "" and "cap" in test_details.split('_'):
+                caption = generate_caption(It_warp, max_words=2, style=style)
+            else:
+                caption = generate_keywords(style, max_words=4)
+
+            It_warp = self.pipeline2(caption,
+                                     width=warp_img.width, height=warp_img.height,
+                                     negative_prompt="worst quality. blurry. indistinct facial features. motion blur. faded colors. abstract. unclear background. washed out. distorted.",
+                                     num_inference_steps=NIS, image=warp_img, strength=0.4).images[0]
+            It_warp = It_warp.resize(self.config.test_size)
+            It_warp = self.trans(It_warp.convert('RGB')).to(self.device).unsqueeze(0)
         # breakpoint()
 
         return It_warp, F12, F21, F12in, F21in

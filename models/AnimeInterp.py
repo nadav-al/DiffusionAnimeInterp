@@ -80,7 +80,7 @@ class AnimeInterp(nn.Module):
         tmp[:, 1:] = tmp[:, 1:].clone() * tmp.size()[2] / flo.size()[2]
 
         return tmp
-    def forward(self, I1, I2, F12i, F21i, t, folder=None):
+    def forward(self, I1, I2, F12i, F21i, t, folder=None, test_details=""):
         r = 0.6
 
         # I1 = I1[:, [2, 1, 0]]
@@ -162,11 +162,11 @@ class AnimeInterp(nn.Module):
 
         I1t_im = self.revtrans(I1t.cpu()[0])
         I2t_im = self.revtrans(I2t.cpu()[0])
-        I1t_im = I1t_im.resize((1024, 1024))
-        I2t_im = I2t_im.resize((1024, 1024))
+        # I1t_im = I1t_im.resize((1024, 1024))
+        # I2t_im = I2t_im.resize((1024, 1024))
 
         from utils.files_and_folders import generate_folder
-        path = generate_folder("latents", self.config.store_path, extension=folder)
+        path = generate_folder("latents", folder_base=folder, root_path=self.config.store_path)
 
         I1t_im.save(path + '/I1t.png')
         I2t_im.save(path + '/I2t.png')
